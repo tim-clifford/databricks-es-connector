@@ -202,25 +202,25 @@ class _FakeES:
 
 def test_resolve_num_slices_uses_configured():
     es = _FakeES(settings={"i": {"settings": {"index.number_of_shards": "5"}}})
-    assert _resolve_num_slices(es, "i", 8) == 8   # configured overrides shard count
+    assert _resolve_num_slices(es, "i", 8, retry_cfg=_rcfg()) == 8   # configured overrides shard count
 
 def test_resolve_num_slices_defaults_to_shard_count():
     es = _FakeES(settings={"i": {"settings": {"index.number_of_shards": "3"}}})
-    assert _resolve_num_slices(es, "i", None) == 3
+    assert _resolve_num_slices(es, "i", None, retry_cfg=_rcfg()) == 3
 
 def test_resolve_num_slices_raises_on_error_by_default():
     # 0.6.0: the serial fallback is a silent loss of parallelism, and a logging warning is easy to
     # miss entirely on serverless, so the shard-count failure RAISES unless explicitly allowed.
     es = _FakeES(settings=None)   # get_settings raises
     with pytest.raises(RuntimeError, match="could not read the shard count"):
-        _resolve_num_slices(es, "i", None)
+        _resolve_num_slices(es, "i", None, retry_cfg=_rcfg())
 
 
 def test_resolve_num_slices_error_names_the_index_and_the_fix():
     # The message has to be actionable: which index, and both escape hatches.
     es = _FakeES(settings=None)
     with pytest.raises(RuntimeError) as exc:
-        _resolve_num_slices(es, "my_index", None)
+        _resolve_num_slices(es, "my_index", None, retry_cfg=_rcfg())
     msg = str(exc.value)
     assert "my_index" in msg
     assert "num_slices" in msg and "strict_slices=False" in msg
@@ -232,7 +232,7 @@ def test_resolve_num_slices_falls_back_to_one_when_not_strict(caplog):
     import logging
     es = _FakeES(settings=None)   # get_settings raises
     with caplog.at_level(logging.WARNING, logger="databricks_es_connector.read"):
-        assert _resolve_num_slices(es, "my_index", None, strict=False) == 1
+        assert _resolve_num_slices(es, "my_index", None, strict=False, retry_cfg=_rcfg()) == 1
     assert any("my_index" in r.message and "single" in r.message.lower()
                for r in caplog.records), "expected a WARNING naming the index on fallback"
 
@@ -241,12 +241,12 @@ def test_resolve_num_slices_does_not_warn_when_configured(caplog):
     import logging
     es = _FakeES(settings=None)
     with caplog.at_level(logging.WARNING, logger="databricks_es_connector.read"):
-        assert _resolve_num_slices(es, "my_index", 4) == 4
+        assert _resolve_num_slices(es, "my_index", 4, retry_cfg=_rcfg()) == 4
     assert caplog.records == []
 
 def test_resolve_num_slices_floors_configured_at_one():
     es = _FakeES(settings={"i": {"settings": {"index.number_of_shards": "3"}}})
-    assert _resolve_num_slices(es, "i", 0) == 1   # never < 1
+    assert _resolve_num_slices(es, "i", 0, retry_cfg=_rcfg()) == 1   # never < 1
 
 
 # --- _make_slice_reader: yields schema-shaped pandas frames, sliced correctly ----------------
@@ -257,7 +257,7 @@ def test_slice_reader_yields_coerced_frames(monkeypatch):
 
     # Stub _slice_hits so no ES is needed; capture the slice_spec it was called with per slice.
     seen_specs = []
-    def _fake_slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None):
+    def _fake_slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None, **_kw):
         seen_specs.append(slice_spec)
         sid = slice_spec["id"] if slice_spec else 0
         # one hit per slice, id encodes the slice so we can assert per-partition output
@@ -280,7 +280,7 @@ def test_slice_reader_single_slice_is_unsliced(monkeypatch):
     pd = pytest.importorskip("pandas")
     import databricks_es_connector.read as read_mod
     seen_specs = []
-    def _fake_slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None):
+    def _fake_slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None, **_kw):
         seen_specs.append(slice_spec)
         return iter([{"_id": "k0", "_source": {"doc_id": "k0", "n": 0}}])
     monkeypatch.setattr(read_mod, "_slice_hits", _fake_slice_hits)
@@ -336,7 +336,7 @@ def _page(*hit_ids, pit_id=None):
 def test_slice_hits_pages_until_empty():
     from databricks_es_connector.read import _slice_hits
     es = _FakeSearchES([_page("a", "b"), _page("c"), _page()])  # 2 + 1 + terminate
-    got = [h["_id"] for h in _slice_hits(es, "pit-1", {"match_all": {}}, 500, "1m")]
+    got = [h["_id"] for h in _slice_hits(es, "pit-1", {"match_all": {}}, 500, "1m", retry_cfg=_rcfg())]
     assert got == ["a", "b", "c"]
     # 3 search calls: two returning hits, one empty that stops the loop.
     assert len(es.calls) == 3
@@ -348,7 +348,7 @@ def test_slice_hits_pages_until_empty():
 def test_slice_hits_carries_pit_and_sort_no_index():
     from databricks_es_connector.read import _slice_hits
     es = _FakeSearchES([_page("a"), _page()])
-    list(_slice_hits(es, "pit-xyz", {"term": {"x": 1}}, 250, "2m"))
+    list(_slice_hits(es, "pit-xyz", {"term": {"x": 1}}, 250, "2m", retry_cfg=_rcfg()))
     c = es.calls[0]
     assert c["pit"] == {"id": "pit-xyz", "keep_alive": "2m"}
     assert c["sort"] == [{"_shard_doc": "asc"}]
@@ -359,14 +359,14 @@ def test_slice_hits_carries_pit_and_sort_no_index():
 def test_slice_hits_passes_slice_spec_when_given():
     from databricks_es_connector.read import _slice_hits
     es = _FakeSearchES([_page()])
-    list(_slice_hits(es, "pit", {"match_all": {}}, 500, "1m", slice_spec={"id": 2, "max": 4}))
+    list(_slice_hits(es, "pit", {"match_all": {}}, 500, "1m", slice_spec={"id": 2, "max": 4}, retry_cfg=_rcfg()))
     assert es.calls[0]["slice"] == {"id": 2, "max": 4}
 
 def test_slice_hits_follows_refreshed_pit_id():
     # ES can return a refreshed pit_id per page; the next request must use it.
     from databricks_es_connector.read import _slice_hits
     es = _FakeSearchES([_page("a", pit_id="pit-2"), _page()])
-    list(_slice_hits(es, "pit-1", {"match_all": {}}, 500, "1m"))
+    list(_slice_hits(es, "pit-1", {"match_all": {}}, 500, "1m", retry_cfg=_rcfg()))
     assert es.calls[0]["pit"]["id"] == "pit-1"   # first uses the opened id
     assert es.calls[1]["pit"]["id"] == "pit-2"   # second uses the refreshed id
 
@@ -379,7 +379,7 @@ def test_slice_hits_resends_keep_alive_on_every_page():
     # mid-read under exactly the lazy/backpressure conditions the docs say are safe.
     from databricks_es_connector.read import _slice_hits
     es = _FakeSearchES([_page("a"), _page("b"), _page("c"), _page()])  # 3 data pages + terminator
-    list(_slice_hits(es, "pit-1", {"match_all": {}}, 500, "7m"))
+    list(_slice_hits(es, "pit-1", {"match_all": {}}, 500, "7m", retry_cfg=_rcfg()))
     # Every search call, first, middle, and the empty terminating one, carries keep_alive.
     assert len(es.calls) == 4
     for c in es.calls:
@@ -437,7 +437,7 @@ def test_read_index_distributed_opens_pit_and_fans_out(monkeypatch):
     es = _FakeSearchES([])
     _install_fake_es(monkeypatch, es)
     # Force a known slice count so we can assert the fan-out width.
-    monkeypatch.setattr(read_mod, "_resolve_num_slices", lambda es, index, cfg_n, strict=True: 4)
+    monkeypatch.setattr(read_mod, "_resolve_num_slices", lambda es, index, cfg_n, strict=True, **_kw: 4)
     spark = _FakeSpark()
     schema = _Schema([("doc_id", "string")])
 
@@ -474,8 +474,107 @@ def test_read_index_distributed_swallows_client_close_failure(monkeypatch):
             raise RuntimeError("client close failed")
     es = _CloseBoomES([])
     _install_fake_es(monkeypatch, es)
-    monkeypatch.setattr(read_mod, "_resolve_num_slices", lambda es, index, cfg_n, strict=True: 2)
+    monkeypatch.setattr(read_mod, "_resolve_num_slices", lambda es, index, cfg_n, strict=True, **_kw: 2)
     spark = _FakeSpark()
     df = read_mod.read_index(spark, _rcfg(), _Schema([("doc_id", "string")]))
     assert spark.mapped["nparts"] == 2     # returned the lazy DF despite the close failure
     assert es.closed == []                 # PIT still not closed (lazy)
+
+
+# --- connector-managed retries on the read path ------------------------------------------------
+# Every read-side ES call (per-page search, shard-count lookup, PIT open) goes through
+# retry.call_with_retries, so a transient 429/503 or dropped connection is retried with backoff
+# instead of failing the read. Re-requesting any of them is idempotent.
+
+def _api_error(status):
+    from elasticsearch import ApiError
+    from elastic_transport import ApiResponseMeta, HttpHeaders
+    meta = ApiResponseMeta(status=status, http_version="1.1", headers=HttpHeaders({}), duration=0.0,
+                           node=None)
+    return ApiError(str(status), meta=meta, body={})
+
+
+@pytest.fixture
+def _no_backoff(monkeypatch):
+    import time
+    monkeypatch.setattr(time, "sleep", lambda *_a, **_k: None)
+
+
+def test_slice_hits_retries_a_failed_page_with_the_same_request(_no_backoff):
+    from databricks_es_connector.read import _slice_hits
+    from elasticsearch import ConnectionError as EsConnectionError
+
+    class _FlakySearchES(_FakeSearchES):
+        def __init__(self, pages, failures):
+            super().__init__(pages)
+            self.failures = list(failures)
+
+        def search(self, **kwargs):
+            if self.failures:
+                self.calls.append(kwargs)
+                raise self.failures.pop(0)
+            return super().search(**kwargs)
+
+    es = _FlakySearchES([_page("a", "b"), _page()], [_api_error(429), EsConnectionError("reset")])
+    got = [h["_id"] for h in _slice_hits(es, "pit-1", {"match_all": {}}, 500, "1m", retry_cfg=_rcfg())]
+    assert got == ["a", "b"]
+    assert len(es.calls) == 4                    # 2 failed attempts + the page + the empty terminator
+    assert es.calls[0] == es.calls[1] == es.calls[2]   # each retry re-sends the identical request
+
+
+def test_slice_hits_gives_up_after_the_budget(_no_backoff):
+    from databricks_es_connector.read import _slice_hits
+
+    class _DownES(_FakeSearchES):
+        def search(self, **kwargs):
+            self.calls.append(kwargs)
+            raise _api_error(503)
+
+    es = _DownES([])
+    with pytest.raises(Exception, match="503"):
+        list(_slice_hits(es, "pit-1", {"match_all": {}}, 500, "1m",
+                         retry_cfg=_rcfg(max_retries_per_request=2)))
+    assert len(es.calls) == 3
+
+
+def test_resolve_num_slices_retries_before_the_strict_failure(_no_backoff):
+    class _FlakyIndices:
+        def __init__(self):
+            self.calls = 0
+
+        def get_settings(self, index, flat_settings):
+            self.calls += 1
+            if self.calls == 1:
+                raise _api_error(502)
+            return {"i": {"settings": {"index.number_of_shards": "6"}}}
+
+    es = _FakeES()
+    es.indices = _FlakyIndices()
+    assert _resolve_num_slices(es, "i", None, retry_cfg=_rcfg()) == 6
+    assert es.indices.calls == 2
+
+
+def test_read_index_retries_the_pit_open(monkeypatch, _no_backoff):
+    import databricks_es_connector.read as read_mod
+    from elasticsearch import ConnectionTimeout
+
+    class _FlakyPitES(_FakeSearchES):
+        pit_calls = 0
+
+        def open_point_in_time(self, index, keep_alive):
+            type(self).pit_calls += 1
+            if type(self).pit_calls == 1:
+                raise ConnectionTimeout("t")
+            return {"id": "pit-abc"}
+
+    es = _FlakyPitES([])
+    _install_fake_es(monkeypatch, es)
+    monkeypatch.setattr(read_mod, "_resolve_num_slices", lambda es, index, cfg_n, strict=True, **_kw: 2)
+    spark = _FakeSpark()
+    read_mod.read_index(spark, _rcfg(), _Schema([("doc_id", "string")]))
+    assert _FlakyPitES.pit_calls == 2
+    assert spark.mapped["nparts"] == 2
+
+
+def test_read_client_never_retries_on_its_own():
+    assert _rcfg().client_kwargs()["max_retries"] == 0

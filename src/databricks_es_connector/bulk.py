@@ -16,6 +16,8 @@ import logging
 from typing import Iterator
 
 from .config import EsConfig
+from .retry import (CONNECTION_ERROR, ERROR, RETRY_STATUS, TIMEOUT, backoff_seconds,
+                    call_with_retries, failure_kind)
 from .spark_prep import sanitize_for_arrow, normalize_timestamps_for_utc
 
 _log = logging.getLogger(__name__)
@@ -198,14 +200,23 @@ class _GilWaitProbe:
         return list(self._lags_ms)
 
 
+# The failure kinds a failed send can carry (retry.failure_kind), each summarized as
+# `<kind>_sends` / `<kind>_wait_ms`. Imported from retry, not re-typed, so the two cannot drift.
+_FAILED_SEND_KINDS = (TIMEOUT, CONNECTION_ERROR, RETRY_STATUS, ERROR)
+_FAILED_SEND_KEYS = tuple(f"{k}_{suffix}" for k in _FAILED_SEND_KINDS for suffix in ("sends", "wait_ms"))
+
+
 def _aggregate_bulk_stats(stats):
     """Reduce a partition's per-send records to single-row summary columns.
 
     `stats` is the list bulk_stats collects, one tuple per es.bulk send:
     `(docs, bytes, rtt_ms, took_ms, cpu_ms, http_ms, outcome)`, where `outcome` is "ok" (a returned
-    response), "timeout" (raised ConnectionTimeout) or "error" (any other raised transport failure). A
-    failed send has `took_ms`/`http_ms` None. The SUCCESSFUL sends drive the throughput and latency
-    columns; the failed sends are summarized separately so their wall cost is visible rather than lost.
+    response) or the retry.failure_kind of a send that raised: "timeout" (ConnectionTimeout),
+    "connection_error" (ConnectionError, TLS included), "retry_status" (an HTTP status in
+    request_retry_status_list) or "error" (anything else). A failed send has `took_ms`/`http_ms` None.
+    One more entry kind is not a send: "backoff" records one retry wait, with the wait in the rtt_ms
+    slot. The SUCCESSFUL sends drive the throughput and latency columns; the failed sends and the waits
+    are summarized separately so their wall cost is visible rather than lost.
 
     Successful-send columns: `n_sends` (successful sends), `docs_sent` (retries included), `bytes_sent`
     (uncompressed NDJSON), `send_busy_ms` (summed round-trip time; over the partition wall clock =>
@@ -217,13 +228,20 @@ def _aggregate_bulk_stats(stats):
     `send_busy_ms - send_cpu_ms` is the off-CPU send time; pair it with the gil_wait_ms columns to split
     that into socket versus GIL. `took_ms`/`http_ms` that are None are excluded from those aggregates only.
 
-    Failed-send columns: `timeout_sends` / `timeout_wait_ms` and `error_sends` / `error_wait_ms` count
-    those attempts and sum their wall time, so total time in es.bulk = `send_busy_ms + timeout_wait_ms +
-    error_wait_ms`. `timeout_wait_ms` is the cost of connector-owned timeout retries (retry_transport_timeout).
+    Failed-send columns: `<kind>_sends` / `<kind>_wait_ms` for each failure kind (timeout,
+    connection_error, retry_status, error) count those attempts and sum their wall time, so total time
+    in es.bulk = `send_busy_ms` + the four `*_wait_ms`. `backoff_sleep_ms` is the summed retry wait
+    between attempts (both retry layers), time the partition spent asleep rather than in es.bulk.
+
+    An entry with an outcome outside the known set fails closed (ValueError) rather than being dropped
+    from every column: a new kind must be added here, not silently uncounted.
     """
+    _known = ("ok", "backoff") + _FAILED_SEND_KINDS
+    _unknown = {s[6] for s in stats} - set(_known)
+    if _unknown:
+        raise ValueError(f"unknown bulk_stats outcome(s) {sorted(_unknown)}; expected one of {_known}")
     ok = [s for s in stats if s[6] == "ok"]
-    timeouts = [s for s in stats if s[6] == "timeout"]
-    errors = [s for s in stats if s[6] == "error"]
+    backoffs = [s for s in stats if s[6] == "backoff"]
 
     docs_sent = sum(s[0] for s in ok)
     bytes_sent = sum(s[1] for s in ok)
@@ -252,11 +270,12 @@ def _aggregate_bulk_stats(stats):
         "bytes_sent": [bytes_sent],
         "send_busy_ms": [float(send_busy_ms)],
         "send_cpu_ms": [float(send_cpu_ms)],
-        "timeout_sends": [len(timeouts)],
-        "timeout_wait_ms": [float(sum(s[2] for s in timeouts))],
-        "error_sends": [len(errors)],
-        "error_wait_ms": [float(sum(s[2] for s in errors))],
+        "backoff_sleep_ms": [float(sum(s[2] for s in backoffs))],
     }
+    for kind in _FAILED_SEND_KINDS:
+        failed = [s for s in stats if s[6] == kind]
+        out[f"{kind}_sends"] = [len(failed)]
+        out[f"{kind}_wait_ms"] = [float(sum(s[2] for s in failed))]
     out.update(_dist("rtt_ms", rtts))
     out.update(_dist("http_ms", https))
     out.update(_dist("took_ms", tooks))
@@ -326,7 +345,7 @@ def _new_diag() -> dict:
 # (test_bulk_stats_diag_keys_agree_*) asserts the _DIAG_KEYS subset relationship to catch drift.
 _STAT_KEYS = ("n_sends", "docs_sent", "bytes_sent", "send_busy_ms", "send_cpu_ms",
               "partition_wall_ms",
-              "timeout_sends", "timeout_wait_ms", "error_sends", "error_wait_ms",
+              *_FAILED_SEND_KEYS, "backoff_sleep_ms",
               *_DIAG_KEYS,
               "rtt_ms_mean", "rtt_ms_p50", "rtt_ms_p95", "rtt_ms_max",
               "http_ms_mean", "http_ms_p50", "http_ms_p95", "http_ms_max",
@@ -341,27 +360,28 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
 
     `lines` is a list where each element is ONE row's action ("header\\nsource"), so es.bulk returns
     one response item per element, in order, and a retryable item maps back to its line by index.
-    Implements a per-document retry the connector treats as load-bearing: the _bulk API answers HTTP
-    200 even when items inside it fail, so transport-level retries never cover a 429'd document. Only
-    items whose status is in cfg.retry_on_doc_status are retried, up to cfg.max_retries_per_doc, with
-    exponential backoff; everything else is tallied immediately.
+    Two retry layers run here. Every send goes through retry.call_with_retries, which re-sends the
+    whole chunk on a retryable whole-request failure (timeout, connection error, or a status in
+    cfg.request_retry_status_list) up to cfg.max_retries_per_request times. Inside a response, the
+    per-document retry the connector treats as load-bearing: the _bulk API answers HTTP 200 even when
+    items inside it fail, so a whole-request retry never covers a 429'd document. Only items whose
+    status is in cfg.retry_on_doc_status are retried, up to cfg.max_retries_per_doc; everything else is
+    tallied immediately. Both layers wait with retry.backoff_seconds.
     """
     import time as _t
 
-    # ConnectionTimeout is needed to CLASSIFY a timed-out send in bulk_stats (below) and, when the
-    # connector owns timeout retries, to decide what _send_retrying re-sends. Resolve it once here (a
-    # cheap cached import) only when either path needs it. _timeout_excs is the retry allow-list:
-    # ConnectionTimeout ONLY, and the empty tuple when the knob is off so `except ()` catches nothing.
-    _ConnectionTimeout = None
-    if cfg.bulk_stats or cfg.retry_transport_timeout:
-        from elasticsearch import ConnectionTimeout as _ConnectionTimeout
-    _timeout_excs = (_ConnectionTimeout,) if cfg.retry_transport_timeout else ()
+    def _record_backoff(seconds):
+        # A backoff wait is recorded as its own stats entry (outcome "backoff", rtt field = the wait), so
+        # it merges through the same lock-free per-task stats lists as the sends and sums into
+        # bulk_stats backoff_sleep_ms. Nothing is recorded when bulk_stats is off.
+        if stats is not None:
+            stats.append((0, 0, seconds * 1000.0, None, 0.0, None, "backoff"))
 
     def _send(ops, filter_path=None):
         # One es.bulk send. When `stats` is collecting, time the round trip and record a per-send tuple
         # (docs, bytes, rtt_ms, took_ms, cpu_ms, http_ms, outcome); otherwise zero overhead (no timers).
-        # A FAILED send is recorded too (took_ms/http_ms None, outcome "timeout" or "error") so its wall
-        # cost -- e.g. a chunk that burned request_timeout before raising ConnectionTimeout -- is VISIBLE
+        # A FAILED send is recorded too (took_ms/http_ms None, outcome its retry.failure_kind) so its wall
+        # cost - e.g. a chunk that burned request_timeout before raising ConnectionTimeout - is VISIBLE
         # in bulk_stats rather than vanishing; the exception is then re-raised to the caller unchanged.
         kw = {"filter_path": filter_path} if filter_path else {}
         if stats is None:
@@ -373,8 +393,7 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         except Exception as _e:  # noqa: BLE001  -- record the failed attempt's cost, then re-raise
             _rtt = (_t.perf_counter() - _t0) * 1000.0
             _cpu = (_t.thread_time() - _cpu0) * 1000.0
-            _outcome = ("timeout" if (_ConnectionTimeout is not None
-                                      and isinstance(_e, _ConnectionTimeout)) else "error")
+            _outcome = failure_kind(_e, cfg)
             stats.append((len(ops), sum(len(op) for op in ops), _rtt, None, _cpu, None, _outcome))
             raise
         _rtt = (_t.perf_counter() - _t0) * 1000.0
@@ -403,31 +422,18 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         stats.append((len(ops), _bytes, _rtt, resp["took"] if "took" in resp else None, _cpu, _http, "ok"))
         return resp
 
-    # Whole-request timeout retry, owned by the connector when cfg.retry_transport_timeout is on (the
-    # write client is then built with retry_on_timeout=False, so the transport no longer re-sends a
-    # timed-out bulk itself -- see EsWriteConfig.client_kwargs). On a ConnectionTimeout ONLY, re-send the
-    # same chunk with exponential backoff up to cfg.transport_max_retries times; every OTHER exception
-    # propagates on its first attempt to the caller's fail-closed handling below (auth, RequestError,
-    # ConnectionError, serialization -- none of which a re-send would fix). A timed-out send is an UNKNOWN
+    # Whole-request retry (retry.call_with_retries): the client is built with the transport's own
+    # retries disabled, so this is the only layer that re-sends a failed request. A retryable failure
+    # (timeout when cfg.retry_on_timeout, connection error, or a status in cfg.request_retry_status_list)
+    # re-sends the SAME chunk with backoff up to cfg.max_retries_per_request times; anything else, or the
+    # last failure once the budget is spent, propagates to the caller's fail-closed handling below
+    # (count the chunk as errors, surface via reconcile). A timed-out or 5xx'd send is an UNKNOWN
     # outcome, so the re-send re-applies the chunk (idempotent with id_field; a duplicate with auto-ids,
-    # accepted at-least-once), matching the fast-path reship. The retry runs here in connector code with
-    # backoff and a bounded budget, rather than the transport's hidden, immediate re-sends, and every
-    # attempt (each failed one included) is recorded in bulk_stats by _send, so the retry's wall cost is
-    # visible. When the knob is off, _timeout_excs (resolved at the top of this function) is the empty
-    # tuple, `except ()` catches nothing, and this is a zero-behavior pass-through to _send.
+    # accepted at-least-once), matching the fast-path reship. Every attempt, each failed one included,
+    # is recorded in bulk_stats by _send, and every wait by _record_backoff, so the retry's cost is visible.
     def _send_retrying(ops, filter_path=None):
-        attempt = 0
-        while True:
-            try:
-                return _send(ops, filter_path=filter_path)
-            except _timeout_excs:
-                # Unreachable when the knob is off (_timeout_excs is empty). Exhausting the budget
-                # re-raises the ConnectionTimeout to the fail-closed except block below, so the terminal
-                # behavior (count the chunk as errors, surface via reconcile) is exactly as before.
-                if attempt >= cfg.transport_max_retries:
-                    raise
-                attempt += 1
-                _t.sleep(min(2 ** attempt, 30))
+        return call_with_retries(lambda: _send(ops, filter_path=filter_path), cfg,
+                                 on_backoff=_record_backoff)
 
     # Fast path (GIL avoidance): on any delete-free write, a clean chunk needs only the top-level
     # `errors` flag, not per-item detail. Ship with filter_path="errors" so Elasticsearch returns just
@@ -501,8 +507,8 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         try:
             resp = _send_retrying(pending, filter_path=_full_filter_path)
         except Exception as _e:  # noqa: BLE001
-            # A whole-request transport failure (persistent 429/503, dropped connection) survived the
-            # client's transport_max_retries. Record it rather than letting it abort the partition:
+            # A whole-request failure (persistent 429/503, dropped connection) survived
+            # cfg.max_retries_per_request connector retries, or was not retryable. Record it rather than letting it abort the partition:
             # count every still-pending line as an ERROR (fail closed, surfaced via reconcile), instead
             # of propagating and failing the whole mapInPandas partition on one chunk.
             counts["errors"] += len(pending)
@@ -550,8 +556,11 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         if not retry_lines:
             return
         attempt += 1
-        # Exponential backoff: initial_backoff (2s) * 2**(attempt-1) => 2s, 4s, 8s, capped at 30s.
-        _t.sleep(min(2 ** attempt, 30))
+        # Same backoff as the whole-request retry: retry_backoff_initial * 2**(attempt-1), capped at
+        # retry_backoff_max (defaults 2s, 4s, 8s, ... 30s).
+        _wait = backoff_seconds(attempt, cfg)
+        _t.sleep(_wait)
+        _record_backoff(_wait)
         pending = retry_lines
 
 
@@ -1024,7 +1033,7 @@ def _preflight(df, cfg: EsConfig) -> None:
         from elasticsearch import Elasticsearch
         es = Elasticsearch(**cfg.client_kwargs())
         try:
-            exists = bool(es.indices.exists(index=cfg.index))
+            exists = bool(call_with_retries(lambda: es.indices.exists(index=cfg.index), cfg))
         finally:
             try:
                 es.close()
@@ -1065,7 +1074,8 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
 
     When `cfg.bulk_stats=True`, the result additionally carries 'bulk_stats': one entry per partition,
     each {n_sends, docs_sent, bytes_sent, send_busy_ms, send_cpu_ms, partition_wall_ms,
-    timeout_sends, timeout_wait_ms, error_sends, error_wait_ms,
+    timeout_sends, timeout_wait_ms, connection_error_sends, connection_error_wait_ms,
+    retry_status_sends, retry_status_wait_ms, error_sends, error_wait_ms, backoff_sleep_ms,
     docs_retried, rejected_429, rejected_409, rejected_4xx_other, rejected_5xx, docs_deduped,
     rtt_ms_mean/p50/p95/max, http_ms_mean/p50/p95/max, took_ms_mean/p50/p95/max,
     gil_wait_ms_total/p50/p95/max, gil_wait_samples}. The round trip splits into three NESTED timings,
@@ -1079,17 +1089,20 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
     (the partition wall clock) is the effective in-flight concurrency the partition actually reached
     (~1 == serial, ~write_concurrency == fully overlapped). All of the above are over SUCCESSFUL sends.
 
-    `timeout_sends`/`timeout_wait_ms` and `error_sends`/`error_wait_ms` cover the sends that RAISED
-    (a ConnectionTimeout, or any other transport error): their count and summed wall time, so total time
-    spent in es.bulk = send_busy_ms + timeout_wait_ms + error_wait_ms and none of it is hidden.
-    `timeout_wait_ms` is the wall cost of connector-owned timeout retries (see `retry_transport_timeout`):
-    a non-zero value with a low final error count means retries are landing the data; a large value with
-    errors still nonzero means timeouts are outliving the budget. Note `n_sends` counts only SUCCESSFUL
-    sends, so it can be 0 while `timeout_sends`/`error_sends` are non-zero (a partition whose every send
-    failed): a consumer computing per-send ratios (e.g. `docs_sent / n_sends`) must guard a zero `n_sends`.
+    The failed-send columns cover the sends that RAISED, by retry.failure_kind: `timeout_*` (a
+    ConnectionTimeout), `connection_error_*` (connection refused or reset, DNS, TLS), `retry_status_*` (an
+    HTTP status in request_retry_status_list, e.g. a whole-request 429 from indexing pressure) and
+    `error_*` (anything else, never retried). Each kind has a send count and summed wall time, so total
+    time spent in es.bulk = send_busy_ms + the four `*_wait_ms` and none of it is hidden.
+    `backoff_sleep_ms` is the summed wait between retries (both layers). Non-zero failed sends with a
+    low final error count mean retries are landing the data; failed sends with errors still non-zero
+    mean failures are outliving the max_retries_per_request budget. Note `n_sends` counts only
+    SUCCESSFUL sends, so it can be 0 while failed sends are non-zero (a partition whose every send
+    failed): a consumer computing per-send ratios (e.g. `docs_sent / n_sends`) must guard a zero
+    `n_sends`.
 
     `docs_retried` is the number of documents re-sent because Elasticsearch rejected them with a
-    retryable per-item status (429; the whole-request timeout analog is `timeout_sends`). `rejected_429`
+    retryable per-item status (429; the whole-request analog is `retry_status_sends`). `rejected_429`
     / `rejected_409` / `rejected_4xx_other` / `rejected_5xx` bucket every non-2xx, non-ignored item
     response by status, counted on every occurrence -- so a 429 that later succeeds on retry still shows
     as backpressure -- which distinguishes transient pushback you can retry (429/503) from permanent
@@ -1141,7 +1154,9 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
         # (their ratio is the effective in-flight concurrency).
         summary_schema += (", n_sends long, docs_sent long, bytes_sent long, "
                            "send_busy_ms double, send_cpu_ms double, partition_wall_ms double, "
-                           "timeout_sends long, timeout_wait_ms double, error_sends long, error_wait_ms double, "
+                           + "".join(f"{k} {'long' if k.endswith('_sends') else 'double'}, "
+                                     for k in _FAILED_SEND_KEYS)
+                           + "backoff_sleep_ms double, "
                            "docs_retried long, rejected_429 long, rejected_409 long, "
                            "rejected_4xx_other long, rejected_5xx long, docs_deduped long, "
                            "rtt_ms_mean double, rtt_ms_p50 double, rtt_ms_p95 double, rtt_ms_max double, "
