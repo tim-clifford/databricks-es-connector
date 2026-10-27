@@ -201,6 +201,8 @@ def test_status_list_rejects_anything_but_http_error_statuses(bad):
     ({"retry_backoff_initial": "2"}, "retry_backoff_initial"),
     ({"retry_backoff_initial": None}, "retry_backoff_initial"),
     ({"retry_backoff_initial": True}, "retry_backoff_initial"),
+    ({"retry_backoff_max": 86401}, "retry_backoff_max"),
+    ({"retry_backoff_initial": 1e308, "retry_backoff_max": 1e308}, "retry_backoff_initial"),
 ])
 def test_retry_field_validation(kw, field):
     with pytest.raises(ValueError, match=field):
@@ -255,3 +257,8 @@ def test_pit_bound_counts_every_retry_wait_exactly():
     with pytest.raises(ValueError, match="14s"):
         _cfg(EsReadConfig, pit_keep_alive="14s")
     assert _cfg(EsReadConfig, pit_keep_alive="15s").pit_keep_alive == "15s"
+
+
+def test_backoff_upper_bound_is_inclusive():
+    cfg = _cfg(retry_backoff_initial=86400, retry_backoff_max=86400)
+    assert cfg.retry_backoff_max == 86400

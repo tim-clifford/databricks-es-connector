@@ -59,6 +59,11 @@ from dataclasses import dataclass, field, fields
 from typing import Optional
 
 
+# Upper bound on retry_backoff_initial / retry_backoff_max: one day. A single wait longer than that is a
+# configuration mistake, and an absurd value (e.g. 1e308) would otherwise fail only at time.sleep().
+MAX_RETRY_BACKOFF_SECONDS = 86400
+
+
 @dataclass(frozen=True)
 class EsConnection:
     """Connection + client tuning shared by reads and writes.
@@ -120,8 +125,10 @@ class EsConnection:
             v = getattr(self, name)
             # A real, finite, non-negative number. bool is an int subclass and NaN passes every `<`
             # comparison, so both are rejected explicitly rather than failing later at time.sleep().
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
-                raise ValueError(f"{name} must be a finite number of seconds >= 0, got {v!r}")
+            if (isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                    or not 0 <= v <= MAX_RETRY_BACKOFF_SECONDS):
+                raise ValueError(
+                    f"{name} must be a number of seconds from 0 to {MAX_RETRY_BACKOFF_SECONDS}, got {v!r}")
         if self.retry_backoff_max < self.retry_backoff_initial:
             raise ValueError(
                 f"retry_backoff_max ({self.retry_backoff_max}) must be >= retry_backoff_initial "
