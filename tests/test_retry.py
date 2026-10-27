@@ -212,7 +212,7 @@ def test_retry_field_validation(kw, field):
 def test_umbrella_sets_the_per_request_layer():
     cfg = _cfg(max_retries=6)
     assert cfg.max_retries_per_request == 6 and cfg.max_retries_per_doc == 6
-    read = _cfg(EsReadConfig, max_retries=6)
+    read = _cfg(EsReadConfig, max_retries=6, pit_keep_alive="1h")
     assert read.max_retries_per_request == 6
 
 
@@ -227,7 +227,7 @@ def test_es_duration_parses_every_es_time_unit(value, seconds):
     assert _es_duration_seconds(value, "x") == pytest.approx(seconds)
 
 
-@pytest.mark.parametrize("bad", ["5", "5 m", "5M", "1.5m", "-5m", "5w", "", None, 300])
+@pytest.mark.parametrize("bad", ["5", "5 m", "1.5m", "-5m", "5w", "", None, 300])
 def test_pit_keep_alive_must_be_an_es_time_value(bad):
     with pytest.raises(ValueError, match="pit_keep_alive"):
         _cfg(EsReadConfig, pit_keep_alive=bad)
@@ -238,13 +238,26 @@ def test_default_retry_waits_fit_inside_the_default_pit_keep_alive():
     assert cfg.pit_keep_alive == "5m"
 
 
-def test_read_config_rejects_retry_waits_that_could_outlive_the_pit():
+def test_pit_keep_alive_is_normalized_like_elasticsearch():
+    # ES trims and lowercases a time value before parsing it, so "5M" and " 90S " are accepted.
+    from databricks_es_connector.config import _es_duration_seconds
+    assert _es_duration_seconds("5M", "x") == 300 and _es_duration_seconds(" 90S ", "x") == 90
+    assert _cfg(EsReadConfig, pit_keep_alive="5M").pit_keep_alive == "5M"
+
+
+def test_read_config_rejects_retry_waits_that_would_outlive_the_pit():
     # 10 retries at the default backoff wait 2+4+8+16+30*6 = 210s: fine for 5m, not for 3m.
     _cfg(EsReadConfig, max_retries_per_request=10)
     with pytest.raises(ValueError, match="pit_keep_alive"):
         _cfg(EsReadConfig, max_retries_per_request=10, pit_keep_alive="3m")
     with pytest.raises(ValueError, match="pit_keep_alive"):
         _cfg(EsReadConfig, retry_backoff_initial=60, retry_backoff_max=120, pit_keep_alive="2m")
+
+
+def test_short_keep_alive_is_allowed_at_default_retries():
+    # The common pit_keep_alive="1m" with the default request_timeout (60s) and retries (14s of waiting)
+    # stays legal: request time is documented headroom, not enforced.
+    assert _cfg(EsReadConfig, pit_keep_alive="1m").pit_keep_alive == "1m"
 
 
 def test_write_config_is_not_bound_by_pit_keep_alive():
@@ -257,6 +270,19 @@ def test_pit_bound_counts_every_retry_wait_exactly():
     with pytest.raises(ValueError, match="14s"):
         _cfg(EsReadConfig, pit_keep_alive="14s")
     assert _cfg(EsReadConfig, pit_keep_alive="15s").pit_keep_alive == "15s"
+
+
+@pytest.mark.parametrize("retries, expected", [(0, 0), (1, 2), (3, 14), (5, 60), (7, 120), (10_000, 299_910)])
+def test_total_backoff_seconds(retries, expected):
+    # 2, 4, 8, 16, 30, 30, ... ; constant time for any budget.
+    assert retry.total_backoff_seconds(retries, _cfg()) == expected
+
+
+def test_backoff_saturates_instead_of_overflowing_at_huge_attempt_numbers():
+    cfg = _cfg()
+    assert retry.backoff_seconds(5000, cfg) == 30
+    assert retry.total_backoff_seconds(10**9, cfg) == 30 * (10**9 - 4) + 2 + 4 + 8 + 16
+    assert retry.backoff_seconds(5000, _cfg(retry_backoff_initial=0, retry_backoff_max=0)) == 0
 
 
 def test_backoff_upper_bound_is_inclusive():

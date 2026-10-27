@@ -591,7 +591,7 @@ def test_slice_reader_passes_its_own_config_as_retry_cfg(monkeypatch):
         seen.append(retry_cfg)
         return iter([])
     monkeypatch.setattr(read_mod, "_slice_hits", _fake_slice_hits)
-    cfg = _rcfg(num_slices=2, max_retries_per_request=7)
+    cfg = _rcfg(num_slices=2, max_retries_per_request=7, pit_keep_alive="1h")
     reader = _make_slice_reader(cfg, "pit", {"match_all": {}}, [("doc_id", "string")], num_slices=2)
     list(reader(iter([pd.DataFrame({"id": [0, 1]})])))
     assert seen == [cfg, cfg]

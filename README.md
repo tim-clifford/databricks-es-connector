@@ -567,10 +567,14 @@ The wait blocks the executor thread that is sending, which is the point under in
 takes that thread's load off the cluster while it recovers. It also means a high retry count is slow
 to give up: with the defaults, `max_retries=8` is up to 150s of waiting per chunk at each layer.
 
-**Re-sent writes.** A whole-request retry re-sends the whole chunk. After a timeout or a `5xx` the
-outcome of the first attempt is unknown, so the re-send may re-apply documents that were already
-written: with `id_field` set that is an idempotent upsert; with auto-generated ids it duplicates them
-(at-least-once). On a read, a retried point-in-time open whose first response was lost can leave an
+**Re-sent writes.** A whole-request retry re-sends the whole chunk. After a timeout, a connection that
+dropped after the request was sent, or a `5xx`, the outcome of the first attempt is unknown, so the
+re-send may re-apply documents that were already written: with `id_field` set that is an idempotent
+upsert; with auto-generated ids it duplicates them (at-least-once). `retry_on_timeout=False` stops only
+the timeout case.
+
+**Several hosts.** With more than one entry in `hosts`, the client marks a node that fails to connect
+as dead, so the connector's next attempt goes to a healthy node, after the backoff wait. On a read, a retried point-in-time open whose first response was lost can leave an
 extra PIT open on the cluster until `pit_keep_alive` expires.
 
 **Doc shaping**
@@ -626,7 +630,7 @@ cross-batch ordering caveat.
 | `num_slices` | `int \| None` | `None` | No | Parallelism for the distributed read. `None` defaults to the index's shard count. One slice per Spark task. |
 | `strict_slices` | `bool` | `True` | No | When `num_slices` is `None` and the shard-count lookup fails (permissions, an alias spanning indices, a transient error), raise instead of degrading. The only correct fallback is a **single serial reader**: still complete, but it forfeits all parallelism, and a `logging` warning is easy to miss entirely on serverless, so a large export just looks mysteriously slow. Pass `num_slices` explicitly to skip the lookup, or set `False` to accept the serial read. |
 | `batch_size` | `int` | `1000` | No | Docs per scroll/PIT page. Must be positive. |
-| `pit_keep_alive` | `str` | `"5m"` | No | Point-in-Time lifetime, as a **sliding window**: each page re-sends it and resets the PIT's expiry, so it need only cover the longest gap between consecutive reads of the PIT (for `read_index`, the lazy open-to-first-page scheduling gap), not the whole job. An Elasticsearch time value (`d`, `h`, `m`, `s`, `ms`, `micros`, `nanos`, e.g. `"90s"`). It must also be longer than the worst-case retry wait for one page (the sum of every backoff wait `max_retries_per_request` allows), so the PIT cannot expire while a page is retried; the constructor raises otherwise. See the Reading section. |
+| `pit_keep_alive` | `str` | `"5m"` | No | Point-in-Time lifetime, as a **sliding window**: each page re-sends it and resets the PIT's expiry, so it need only cover the longest gap between consecutive reads of the PIT (for `read_index`, the lazy open-to-first-page scheduling gap), not the whole job. An Elasticsearch time value (`d`, `h`, `m`, `s`, `ms`, `micros`, `nanos`, e.g. `"90s"`). It must be longer than the total backoff wait for one page (every wait `max_retries_per_request` allows; 14s with the defaults), or the constructor raises, because the PIT would expire while a page is retried. Each failed attempt also takes time (up to `request_timeout` for a timeout), so leave headroom above that total when you raise the retry settings. See the Reading section. |
 | `include_id` | `bool` | `True` | No | Expose the ES `_id` via the `id_field` column when the schema declares it. |
 
 ## Datatype coverage (write transforms + read inverse)

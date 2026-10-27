@@ -67,8 +67,22 @@ def is_retryable(kind: str, cfg) -> bool:
 
 def backoff_seconds(attempt: int, cfg) -> float:
     """Seconds to wait before retry number `attempt` (1-based): exponential from
-    `cfg.retry_backoff_initial`, capped at `cfg.retry_backoff_max`."""
-    return min(cfg.retry_backoff_initial * 2 ** (attempt - 1), cfg.retry_backoff_max)
+    `cfg.retry_backoff_initial`, capped at `cfg.retry_backoff_max`. The exponent is clamped so a very
+    high attempt number saturates at the cap instead of overflowing the float conversion."""
+    return min(cfg.retry_backoff_initial * 2.0 ** min(attempt - 1, 1023), cfg.retry_backoff_max)
+
+
+def total_backoff_seconds(retries: int, cfg) -> float:
+    """The summed wait across `retries` retries, i.e. backoff_seconds(1..retries). Once the wait reaches
+    the cap every later retry waits the cap, so this stops iterating there (constant time for any
+    budget)."""
+    total = 0.0
+    for n in range(1, retries + 1):
+        wait = backoff_seconds(n, cfg)
+        if wait >= cfg.retry_backoff_max:
+            return total + (retries - n + 1) * cfg.retry_backoff_max
+        total += wait
+    return total
 
 
 def call_with_retries(fn: Callable, cfg, on_backoff: Optional[Callable[[float], None]] = None):

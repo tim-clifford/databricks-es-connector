@@ -352,7 +352,8 @@ def test_max_retries_is_advertised_in_the_signature(name):
 @pytest.mark.parametrize("name,extra", [
     ("EsConnection", {}),
     ("EsWriteConfig", {"index": "i"}),
-    ("EsReadConfig", {"index": "i"}),
+    # A read's PIT must outlast the retries the umbrella allows (see EsReadConfig's pit_keep_alive check).
+    ("EsReadConfig", {"index": "i", "pit_keep_alive": "1h"}),
 ])
 def test_umbrella_works_on_every_config_class(name, extra):
     # Each subclass regenerates its own __init__, so the umbrella has to be applied to all three or a
@@ -367,7 +368,8 @@ def test_umbrella_on_read_config_covers_only_the_layers_it_has():
     # A read has no per-document layer at all (there are no documents being written to retry), so the
     # umbrella must not invent one, and the conflict message must name only the real field.
     from databricks_es_connector import EsReadConfig
-    cfg = EsReadConfig(hosts="https://h:9200", basic_auth=("u", "p"), index="i", max_retries=7)
+    cfg = EsReadConfig(hosts="https://h:9200", basic_auth=("u", "p"), index="i", max_retries=7,
+                       pit_keep_alive="1h")
     assert cfg.max_retries_per_request == 7
     assert not hasattr(cfg, "max_retries_per_doc")
     assert cfg.max_retries == 7
