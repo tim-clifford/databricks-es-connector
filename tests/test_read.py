@@ -609,3 +609,26 @@ def test_read_index_passes_its_config_to_the_shard_lookup(monkeypatch):
     cfg = _rcfg(retry_backoff_initial=1)
     read_mod.read_index(_FakeSpark(), cfg, _Schema([("doc_id", "string")]))
     assert seen == [cfg]
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_resolve_num_slices_exhausted_retries_reach_the_strict_and_fallback_handling(_no_backoff, strict):
+    # A RETRYABLE failure that outlives the budget is retried max_retries_per_request times, then reaches
+    # the existing handling: strict raises the actionable shard-count error, non-strict falls back to 1.
+    class _DownIndices:
+        def __init__(self):
+            self.calls = 0
+
+        def get_settings(self, index, flat_settings):
+            self.calls += 1
+            raise _api_error(503)
+
+    es = _FakeES()
+    es.indices = _DownIndices()
+    cfg = _rcfg(max_retries_per_request=2)
+    if strict:
+        with pytest.raises(RuntimeError, match="could not read the shard count"):
+            _resolve_num_slices(es, "i", None, retry_cfg=cfg)
+    else:
+        assert _resolve_num_slices(es, "i", None, strict=False, retry_cfg=cfg) == 1
+    assert es.indices.calls == 3

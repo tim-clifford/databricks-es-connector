@@ -53,6 +53,7 @@ from __future__ import annotations
 import functools
 import inspect
 import math
+import re
 import warnings
 from dataclasses import dataclass, field, fields
 from typing import Optional
@@ -371,6 +372,34 @@ class EsReadConfig(EsConnection):
             raise ValueError("EsReadConfig.batch_size must be positive")
         if self.num_slices is not None and self.num_slices < 1:
             raise ValueError("EsReadConfig.num_slices must be >= 1 when set")
+        # A page retry waits between attempts, and the PIT is only kept alive by touching it. If the
+        # worst-case total wait for one page reached pit_keep_alive, the PIT could expire mid-retry and
+        # the next attempt would get a 404 (not retryable), failing the read. Reject that configuration
+        # up front instead.
+        keep_alive_s = _es_duration_seconds(self.pit_keep_alive, "EsReadConfig.pit_keep_alive")
+        worst_wait_s = sum(min(self.retry_backoff_initial * 2 ** (n - 1), self.retry_backoff_max)
+                           for n in range(1, self.max_retries_per_request + 1))
+        if worst_wait_s >= keep_alive_s:
+            raise ValueError(
+                f"the worst-case retry wait for one page ({worst_wait_s:g}s: max_retries_per_request="
+                f"{self.max_retries_per_request}, retry_backoff_initial={self.retry_backoff_initial}, "
+                f"retry_backoff_max={self.retry_backoff_max}) is not below pit_keep_alive="
+                f"{self.pit_keep_alive!r} ({keep_alive_s:g}s), so the point-in-time could expire while a "
+                "page is being retried. Raise pit_keep_alive or lower the retry settings.")
+
+
+# Elasticsearch's time units, in seconds. An allow-list: any other unit is rejected rather than guessed.
+_ES_TIME_UNITS = {"d": 86400.0, "h": 3600.0, "m": 60.0, "s": 1.0, "ms": 1e-3, "micros": 1e-6,
+                  "nanos": 1e-9}
+_ES_DURATION_RE = re.compile(r"(\d+)(d|h|m|s|ms|micros|nanos)")
+
+
+def _es_duration_seconds(value, where: str) -> float:
+    """Seconds in an Elasticsearch time value such as "5m" or "90s"; raises ValueError on anything else."""
+    m = _ES_DURATION_RE.fullmatch(value) if isinstance(value, str) else None
+    if m is None:
+        raise ValueError(f"{where} must be an Elasticsearch time value such as '5m' or '90s', got {value!r}")
+    return int(m.group(1)) * _ES_TIME_UNITS[m.group(2)]
 
 
 # The per-layer fields `max_retries` fans out to. Only the ones a class actually HAS are set, so the

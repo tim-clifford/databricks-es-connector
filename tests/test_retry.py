@@ -212,3 +212,39 @@ def test_umbrella_sets_the_per_request_layer():
     assert cfg.max_retries_per_request == 6 and cfg.max_retries_per_doc == 6
     read = _cfg(EsReadConfig, max_retries=6)
     assert read.max_retries_per_request == 6
+
+
+# --- EsReadConfig: retry waits must fit inside pit_keep_alive ------------------------------------
+
+@pytest.mark.parametrize("value, seconds", [
+    ("5m", 300), ("90s", 90), ("1h", 3600), ("2d", 172800), ("1500ms", 1.5), ("10micros", 1e-5),
+    ("10nanos", 1e-8),
+])
+def test_es_duration_parses_every_es_time_unit(value, seconds):
+    from databricks_es_connector.config import _es_duration_seconds
+    assert _es_duration_seconds(value, "x") == pytest.approx(seconds)
+
+
+@pytest.mark.parametrize("bad", ["5", "5 m", "5M", "1.5m", "-5m", "5w", "", None, 300])
+def test_pit_keep_alive_must_be_an_es_time_value(bad):
+    with pytest.raises(ValueError, match="pit_keep_alive"):
+        _cfg(EsReadConfig, pit_keep_alive=bad)
+
+
+def test_default_retry_waits_fit_inside_the_default_pit_keep_alive():
+    cfg = _cfg(EsReadConfig)                     # 2 + 4 + 8 = 14s of waiting, well inside 5m
+    assert cfg.pit_keep_alive == "5m"
+
+
+def test_read_config_rejects_retry_waits_that_could_outlive_the_pit():
+    # 10 retries at the default backoff wait 2+4+8+16+30*6 = 210s: fine for 5m, not for 3m.
+    _cfg(EsReadConfig, max_retries_per_request=10)
+    with pytest.raises(ValueError, match="pit_keep_alive"):
+        _cfg(EsReadConfig, max_retries_per_request=10, pit_keep_alive="3m")
+    with pytest.raises(ValueError, match="pit_keep_alive"):
+        _cfg(EsReadConfig, retry_backoff_initial=60, retry_backoff_max=120, pit_keep_alive="2m")
+
+
+def test_write_config_is_not_bound_by_pit_keep_alive():
+    # Only reads hold a PIT; a write may wait as long as its settings allow.
+    assert _cfg(EsWriteConfig, max_retries_per_request=50).max_retries_per_request == 50
