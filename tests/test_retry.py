@@ -179,6 +179,22 @@ def test_status_list_is_stored_as_a_tuple():
     hash(cfg)                                                # frozen config stays hashable
 
 
+def test_status_list_bounds_are_inclusive():
+    assert _cfg(request_retry_status_list=(400, 599)).request_retry_status_list == (400, 599)
+
+
+def test_total_backoff_is_cheap_with_a_zero_initial_wait():
+    import time
+    cfg = _cfg(retry_backoff_initial=0, retry_backoff_max=30)
+    t0 = time.perf_counter()
+    assert retry.total_backoff_seconds(10**9, cfg) == 0
+    assert time.perf_counter() - t0 < 0.1
+    # And the read config built on that budget constructs promptly.
+    t0 = time.perf_counter()
+    _cfg(EsReadConfig, retry_backoff_initial=0, retry_backoff_max=30, max_retries_per_request=10**9)
+    assert time.perf_counter() - t0 < 0.1
+
+
 def test_empty_status_list_is_allowed():
     assert _cfg(request_retry_status_list=()).request_retry_status_list == ()
 
