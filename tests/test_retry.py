@@ -248,3 +248,10 @@ def test_read_config_rejects_retry_waits_that_could_outlive_the_pit():
 def test_write_config_is_not_bound_by_pit_keep_alive():
     # Only reads hold a PIT; a write may wait as long as its settings allow.
     assert _cfg(EsWriteConfig, max_retries_per_request=50).max_retries_per_request == 50
+
+
+def test_pit_bound_counts_every_retry_wait_exactly():
+    # Defaults: 3 retries wait 2 + 4 + 8 = 14s. A 14s keep-alive is not enough; 15s is.
+    with pytest.raises(ValueError, match="14s"):
+        _cfg(EsReadConfig, pit_keep_alive="14s")
+    assert _cfg(EsReadConfig, pit_keep_alive="15s").pit_keep_alive == "15s"
