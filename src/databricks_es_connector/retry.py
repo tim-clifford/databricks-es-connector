@@ -73,17 +73,15 @@ def backoff_seconds(attempt: int, cfg) -> float:
 
 
 def total_backoff_seconds(retries: int, cfg) -> float:
-    """The summed wait across `retries` retries, i.e. backoff_seconds(1..retries). A zero initial wait
-    means every wait is zero; otherwise the wait doubles until it reaches the cap, after which every
-    later retry waits the cap, so the loop stops there. Either way the cost is bounded (at most ~1100
-    iterations, by the exponent clamp) whatever the budget."""
-    if cfg.retry_backoff_initial == 0:
-        return 0.0
+    """The summed wait across `retries` retries, i.e. backoff_seconds(1..retries). The wait doubles until
+    it stops changing: it reaches the cap, or (for a zero or vanishingly small initial wait) the exponent
+    clamp in backoff_seconds holds it fixed. Every later retry waits that same amount, so the loop stops
+    there and the cost is bounded (at most 1025 iterations) whatever the budget."""
     total = 0.0
     for n in range(1, retries + 1):
         wait = backoff_seconds(n, cfg)
-        if wait >= cfg.retry_backoff_max:
-            return total + (retries - n + 1) * cfg.retry_backoff_max
+        if wait >= cfg.retry_backoff_max or n - 1 >= 1023 or wait == 0:
+            return total + (retries - n + 1) * wait
         total += wait
     return total
 

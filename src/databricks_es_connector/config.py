@@ -46,7 +46,9 @@ when the layers agree, and `None` when they were set granularly (there is no sin
 Both layers wait between attempts with the same exponential backoff,
 `min(retry_backoff_initial * 2**(n-1), retry_backoff_max)` (defaults 2s, 4s, 8s, ... capped at 30s), and
 the wait sleeps BLOCKINGLY in the executor thread. With the defaults, `max_retries=8` is up to 150s of
-sleep per chunk at each layer (2 + 4 + 8 + 16 + 30 * 4), so raise it with that cost in mind.
+sleep for one send (2 + 4 + 8 + 16 + 30 * 4). A chunk can make several sends (the fast-path probe, the
+full-path re-send, and one per per-document retry round), each with its own whole-request budget, so its
+worst case is a multiple of that; raise the retry counts with that cost in mind.
 """
 from __future__ import annotations
 

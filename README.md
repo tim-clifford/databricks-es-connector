@@ -565,7 +565,9 @@ effective value is never in doubt.
 retry_backoff_max)` seconds, so the defaults wait 2s, 4s, 8s, 16s, then 30s for every later retry.
 The wait blocks the executor thread that is sending, which is the point under indexing pressure: it
 takes that thread's load off the cluster while it recovers. It also means a high retry count is slow
-to give up: with the defaults, `max_retries=8` is up to 150s of waiting per chunk at each layer.
+to give up: with the defaults, `max_retries=8` is up to 150s of waiting for one send. A chunk can make
+several sends (the fast-path probe, the full-path re-send, and one per per-document retry round), each
+with its own whole-request budget, so a chunk under sustained pressure can wait a multiple of that.
 
 **Re-sent writes.** A whole-request retry re-sends the whole chunk. After a timeout, a connection that
 dropped after the request was sent, or a `5xx`, the outcome of the first attempt is unknown, so the

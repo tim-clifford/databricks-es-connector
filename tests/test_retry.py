@@ -183,6 +183,17 @@ def test_status_list_bounds_are_inclusive():
     assert _cfg(request_retry_status_list=(400, 599)).request_retry_status_list == (400, 599)
 
 
+@pytest.mark.parametrize("initial", [0, 5e-324, 1e-300])
+def test_total_backoff_is_cheap_for_any_initial_wait(initial):
+    import time
+    cfg = _cfg(retry_backoff_initial=initial, retry_backoff_max=30)
+    t0 = time.perf_counter()
+    total = retry.total_backoff_seconds(10**9, cfg)
+    assert time.perf_counter() - t0 < 0.1
+    assert total == pytest.approx(sum(retry.backoff_seconds(n, cfg) for n in range(1, 1100))
+                                  + (10**9 - 1099) * retry.backoff_seconds(1100, cfg))
+
+
 def test_total_backoff_is_cheap_with_a_zero_initial_wait():
     import time
     cfg = _cfg(retry_backoff_initial=0, retry_backoff_max=30)
