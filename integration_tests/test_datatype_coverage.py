@@ -67,49 +67,49 @@ class TestDatatypeCoverage(NotebookTestFixture):
         full = spark.sql("""
             SELECT
               'row-full'                                     AS doc_id,
-              CAST('hello ☃ 世界' AS STRING)                AS s_string,        - unicode
+              CAST('hello ☃ 世界' AS STRING)                AS s_string,        -- unicode
               CAST(true AS BOOLEAN)                          AS s_bool,
               CAST(7 AS BYTE)                                AS s_byte,
               CAST(300 AS SHORT)                             AS s_short,
               CAST(70000 AS INT)                             AS s_int,
-              CAST(9223372036854775807 AS BIGINT)            AS s_long,          - max long
+              CAST(9223372036854775807 AS BIGINT)            AS s_long,          -- max long
               CAST(1.5 AS FLOAT)                             AS s_float,
               CAST(1.5 AS DOUBLE)                            AS s_double,
-              CAST(0.1 AS FLOAT)                             AS s_float32_prec,  - 32-bit widening
+              CAST(0.1 AS FLOAT)                             AS s_float32_prec,  -- 32-bit widening
               CAST(1.50 AS DECIMAL(10,2))                    AS s_decimal,
               DATE'2021-01-01'                               AS s_date,
               TIMESTAMP'2021-01-01 00:00:00Z'                AS s_timestamp,
-              TIMESTAMP'1969-12-31 23:59:59Z'                AS s_ts_preepoch,   - pre-epoch floor
-              TIMESTAMP_NTZ'2021-06-01 12:00:00'             AS s_timestamp_ntz, - wall-clock, no tz
+              TIMESTAMP'1969-12-31 23:59:59Z'                AS s_ts_preepoch,   -- pre-epoch floor
+              TIMESTAMP_NTZ'2021-06-01 12:00:00'             AS s_timestamp_ntz, -- wall-clock, no tz
               CAST(X'0102' AS BINARY)                        AS s_binary,
               named_struct('ip','10.0.0.1','port',443)       AS s_struct,
-              map('k1','v1','k2','v2')                        AS s_map,           - map<string,string>
-              map('a', 1, 'b', 2)                             AS s_map_int,       - map<string,int>
-              map(1, 'a', 2, 'b')                             AS s_map_intkey,    - non-string keys
-              CAST(map() AS MAP<STRING,INT>)                  AS s_empty_map,     - empty map container
-              map('a', 1, 'b', CAST(NULL AS INT))             AS s_map_null_val,  - null map VALUE
+              map('k1','v1','k2','v2')                        AS s_map,           -- map<string,string>
+              map('a', 1, 'b', 2)                             AS s_map_int,       -- map<string,int>
+              map(1, 'a', 2, 'b')                             AS s_map_intkey,    -- non-string keys
+              CAST(map() AS MAP<STRING,INT>)                  AS s_empty_map,     -- empty map container
+              map('a', 1, 'b', CAST(NULL AS INT))             AS s_map_null_val,  -- null map VALUE
               array(1,2,3)                                    AS s_array,
               array(named_struct('k','a','v',1),
                     named_struct('k','b','v',2))              AS s_array_struct,
-              array()                                         AS s_empty_array,   - empty container
-              array(1, CAST(NULL AS INT), 3)                  AS s_array_null_el, - null array ELEMENT
+              array()                                         AS s_empty_array,   -- empty container
+              array(1, CAST(NULL AS INT), 3)                  AS s_array_null_el, -- null array ELEMENT
               named_struct('inner', named_struct('x',1))      AS s_nested_struct,
-              named_struct('a', 1, 'b', CAST(NULL AS INT))    AS s_struct_null_fld, - partial-null struct
-              CAST(123456789012345678 AS DECIMAL(38,0))       AS s_decimal_hi,    - 18 digits, scale 0: exact
-              CAST(123456789012345678 AS DECIMAL(38,2))       AS s_decimal_hi_s2, - same value, scale 2: lossy on read
-              double('Infinity')                              AS s_pos_inf,       - non-finite
+              named_struct('a', 1, 'b', CAST(NULL AS INT))    AS s_struct_null_fld, -- partial-null struct
+              CAST(123456789012345678 AS DECIMAL(38,0))       AS s_decimal_hi,    -- 18 digits, scale 0: exact
+              CAST(123456789012345678 AS DECIMAL(38,2))       AS s_decimal_hi_s2, -- same value, scale 2: lossy on read
+              double('Infinity')                              AS s_pos_inf,       -- non-finite
               double('-Infinity')                             AS s_neg_inf,
               double('NaN')                                   AS s_nan,
-              parse_json('{"k":1,"nested":[2,3]}')            AS s_variant,       - VARIANT top-level
+              parse_json('{"k":1,"nested":[2,3]}')            AS s_variant,       -- VARIANT top-level
               named_struct('v', parse_json('{"a":true}'),
                            'label','hi')                      AS s_struct_variant,-- VARIANT in struct
               array(parse_json('{"n":1}'),
-                    parse_json('{"n":2}'))                     AS s_array_variant, - VARIANT in array
-              INTERVAL '1 02:03:04' DAY TO SECOND             AS s_interval_dt,   - INTERVAL day-time
-              INTERVAL '2-3' YEAR TO MONTH                    AS s_interval_ym,   - INTERVAL year-month
-              CAST('' AS STRING)                              AS s_empty_string,  - "" is a value, not null
+                    parse_json('{"n":2}'))                     AS s_array_variant, -- VARIANT in array
+              INTERVAL '1 02:03:04' DAY TO SECOND             AS s_interval_dt,   -- INTERVAL day-time
+              INTERVAL '2-3' YEAR TO MONTH                    AS s_interval_ym,   -- INTERVAL year-month
+              CAST('' AS STRING)                              AS s_empty_string,  -- "" is a value, not null
               array(array(1,2), array(3), CAST(array() AS ARRAY<INT>))
-                                                              AS s_array_array    - nested array<array>
+                                                              AS s_array_array    -- nested array<array>
         """)
         # All-NULL row (same schema) to prove the null-of-every-type contract. Explicit CASTs because
         # touching df.schema on a VARIANT column throws on Spark Connect.

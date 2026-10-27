@@ -570,7 +570,8 @@ to give up: with the defaults, `max_retries=8` is up to 150s of waiting per chun
 **Re-sent writes.** A whole-request retry re-sends the whole chunk. After a timeout or a `5xx` the
 outcome of the first attempt is unknown, so the re-send may re-apply documents that were already
 written: with `id_field` set that is an idempotent upsert; with auto-generated ids it duplicates them
-(at-least-once).
+(at-least-once). On a read, a retried point-in-time open whose first response was lost can leave an
+extra PIT open on the cluster until `pit_keep_alive` expires.
 
 **Doc shaping**
 

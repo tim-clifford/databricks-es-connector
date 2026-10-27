@@ -1047,6 +1047,32 @@ def _preflight(df, cfg: EsConfig) -> None:
                 "mapping) first, or set require_existing_index=False to allow auto-creation.")
 
 
+def _summary_schema(cfg) -> str:
+    """The mapInPandas output schema of make_ndjson_partition_writer: the core per-partition counts, plus
+    every bulk_stats column when cfg.bulk_stats is on. A unit test checks its column names and types
+    against what the writer actually emits, since a mismatch would otherwise surface only on Spark."""
+    schema = ("written long, deleted long, errors long, ignored long, "
+              "coerced_nonfinite long, total_input long, error_samples string")
+    if cfg.bulk_stats:
+        # Extra per-partition columns the writer emits under bulk_stats; must match _aggregate_bulk_stats
+        # plus partition_wall_ms (added by the writer). bytes_sent is uncompressed NDJSON size;
+        # send_busy_ms is the summed round-trip time and partition_wall_ms the partition wall clock
+        # (their ratio is the effective in-flight concurrency).
+        schema += (", n_sends long, docs_sent long, bytes_sent long, "
+                   "send_busy_ms double, send_cpu_ms double, partition_wall_ms double, "
+                   + "".join(f"{k} {'long' if k.endswith('_sends') else 'double'}, "
+                   for k in _FAILED_SEND_KEYS)
+                   + "backoff_sleep_ms double, "
+                   "docs_retried long, rejected_429 long, rejected_409 long, "
+                   "rejected_4xx_other long, rejected_5xx long, docs_deduped long, "
+                   "rtt_ms_mean double, rtt_ms_p50 double, rtt_ms_p95 double, rtt_ms_max double, "
+                   "http_ms_mean double, http_ms_p50 double, http_ms_p95 double, http_ms_max double, "
+                   "took_ms_mean double, took_ms_p50 double, took_ms_p95 double, took_ms_max double, "
+                   "gil_wait_ms_total double, gil_wait_ms_p50 double, gil_wait_ms_p95 double, "
+                   "gil_wait_ms_max double, gil_wait_samples long")
+    return schema
+
+
 def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
     """Write a Spark DataFrame to Elasticsearch.
 
@@ -1145,25 +1171,7 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
     df = normalize_timestamps_for_utc(df)
     # Preflight AFTER sanitize (so df.columns is safe to read) but BEFORE any row is written.
     _preflight(df, cfg)
-    summary_schema = ("written long, deleted long, errors long, ignored long, "
-                      "coerced_nonfinite long, total_input long, error_samples string")
-    if cfg.bulk_stats:
-        # Extra per-partition columns the writer emits under bulk_stats; must match _aggregate_bulk_stats
-        # plus partition_wall_ms (added by the writer). bytes_sent is uncompressed NDJSON size;
-        # send_busy_ms is the summed round-trip time and partition_wall_ms the partition wall clock
-        # (their ratio is the effective in-flight concurrency).
-        summary_schema += (", n_sends long, docs_sent long, bytes_sent long, "
-                           "send_busy_ms double, send_cpu_ms double, partition_wall_ms double, "
-                           + "".join(f"{k} {'long' if k.endswith('_sends') else 'double'}, "
-                                     for k in _FAILED_SEND_KEYS)
-                           + "backoff_sleep_ms double, "
-                           "docs_retried long, rejected_429 long, rejected_409 long, "
-                           "rejected_4xx_other long, rejected_5xx long, docs_deduped long, "
-                           "rtt_ms_mean double, rtt_ms_p50 double, rtt_ms_p95 double, rtt_ms_max double, "
-                           "http_ms_mean double, http_ms_p50 double, http_ms_p95 double, http_ms_max double, "
-                           "took_ms_mean double, took_ms_p50 double, took_ms_p95 double, took_ms_max double, "
-                           "gil_wait_ms_total double, gil_wait_ms_p50 double, gil_wait_ms_p95 double, "
-                           "gil_wait_ms_max double, gil_wait_samples long")
+    summary_schema = _summary_schema(cfg)
     # Build the whole `_bulk` action line in Catalyst (JVM) via build_ndjson, then ship the pre-built
     # NDJSON with no per-row Python shaping/serialization (make_ndjson_partition_writer, fanned across
     # write_concurrency worker threads). This is the only write path.

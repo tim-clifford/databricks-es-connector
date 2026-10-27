@@ -195,6 +195,12 @@ def test_status_list_rejects_anything_but_http_error_statuses(bad):
     ({"max_retries_per_request": -1}, "max_retries_per_request"),
     ({"retry_backoff_initial": -1}, "retry_backoff_initial"),
     ({"retry_backoff_initial": 10, "retry_backoff_max": 5}, "retry_backoff_max"),
+    ({"retry_backoff_initial": float("nan")}, "retry_backoff_initial"),
+    ({"retry_backoff_max": float("nan")}, "retry_backoff_max"),
+    ({"retry_backoff_max": float("inf")}, "retry_backoff_max"),
+    ({"retry_backoff_initial": "2"}, "retry_backoff_initial"),
+    ({"retry_backoff_initial": None}, "retry_backoff_initial"),
+    ({"retry_backoff_initial": True}, "retry_backoff_initial"),
 ])
 def test_retry_field_validation(kw, field):
     with pytest.raises(ValueError, match=field):

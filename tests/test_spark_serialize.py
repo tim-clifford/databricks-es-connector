@@ -1698,3 +1698,51 @@ def test_bulk_stats_diag_keys_agree_across_new_diag_and_stat_keys():
     assert set(_new_diag()) == set(_DIAG_KEYS)
     assert set(_DIAG_KEYS).issubset(_STAT_KEYS)
     assert "docs_deduped" in _DIAG_KEYS and "docs_deduped" in _STAT_KEYS
+
+
+def test_per_doc_retry_wait_is_recorded_as_backoff(_no_backoff):
+    # backoff_sleep_ms covers BOTH layers: a per-document 429 round's wait is recorded too.
+    from databricks_es_connector.bulk import _aggregate_bulk_stats
+    es = _FakeES([{"items": [{"index": {"status": 429}}]},
+                  {"items": [{"index": {"status": 201}}]}])
+    stats = []
+    cfg = _cfg(bypass_fast_path=True, bulk_stats=True, retry_backoff_initial=3)
+    _ship_ndjson_chunk(es, ["a"], cfg, _counts(), [], stats=stats)
+    assert [s[6] for s in stats] == ["ok", "backoff", "ok"]
+    assert _aggregate_bulk_stats(stats)["backoff_sleep_ms"] == [3000.0]
+
+
+def _schema_columns(schema):
+    return [tuple(part.strip().split(" ")) for part in schema.split(",")]
+
+
+@pytest.mark.parametrize("bulk_stats", [False, True])
+def test_writer_emits_exactly_the_summary_schema(monkeypatch, _no_backoff, bulk_stats):
+    # The mapInPandas schema string and the writer's emitted columns must agree by name (mapInPandas
+    # matches by name, so a missing or extra column fails only on Spark) and by kind (long vs double vs
+    # string), including a partition that hit every failure kind and waited out retries.
+    pd = pytest.importorskip("pandas")
+    import elasticsearch
+    from databricks_es_connector.bulk import _summary_schema, _STAT_KEYS
+    es = _FailThenOkES([ConnectionTimeout("t"), _EsConnectionError("c"), _api_error(429)],
+                       ok_response={"errors": False})
+    monkeypatch.setattr(elasticsearch, "Elasticsearch", lambda **kw: es)
+    cfg = _cfg(bulk_stats=bulk_stats)
+    out = list(make_ndjson_partition_writer(cfg)(iter([pd.DataFrame({"_ndjson": ["a", "b"]})])))[0]
+    cols = _schema_columns(_summary_schema(cfg))
+    assert [name for name, _ in cols] and set(out.columns) == {name for name, _ in cols}
+    kinds = {"long": "i", "double": "f", "string": "O"}
+    for name, typ in cols:
+        val = out[name].iloc[0]
+        if val is None:
+            continue
+        assert pd.Series([val]).dtype.kind == kinds[typ], (name, typ, val)
+    if bulk_stats:
+        # Every per-partition stat column is in _STAT_KEYS (what _merge_partition_results carries), and
+        # the new kinds are populated by the run above.
+        stat_cols = {name for name, _ in cols} - {"written", "deleted", "errors", "ignored",
+                                                  "coerced_nonfinite", "total_input", "error_samples"}
+        assert stat_cols == set(_STAT_KEYS)
+        row = out.iloc[0]
+        assert (int(row["timeout_sends"]), int(row["connection_error_sends"]),
+                int(row["retry_status_sends"]), float(row["backoff_sleep_ms"])) == (1, 1, 1, 14000.0)

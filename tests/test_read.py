@@ -578,3 +578,34 @@ def test_read_index_retries_the_pit_open(monkeypatch, _no_backoff):
 
 def test_read_client_never_retries_on_its_own():
     assert _rcfg().client_kwargs()["max_retries"] == 0
+
+
+def test_slice_reader_passes_its_own_config_as_retry_cfg(monkeypatch):
+    # Pin the wiring the **_kw stubs above would hide: each slice's page loop retries under the READ
+    # config the reader was built with.
+    pd = pytest.importorskip("pandas")
+    import databricks_es_connector.read as read_mod
+    seen = []
+
+    def _fake_slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None, *, retry_cfg):
+        seen.append(retry_cfg)
+        return iter([])
+    monkeypatch.setattr(read_mod, "_slice_hits", _fake_slice_hits)
+    cfg = _rcfg(num_slices=2, max_retries_per_request=7)
+    reader = _make_slice_reader(cfg, "pit", {"match_all": {}}, [("doc_id", "string")], num_slices=2)
+    list(reader(iter([pd.DataFrame({"id": [0, 1]})])))
+    assert seen == [cfg, cfg]
+
+
+def test_read_index_passes_its_config_to_the_shard_lookup(monkeypatch):
+    import databricks_es_connector.read as read_mod
+    _install_fake_es(monkeypatch, _FakeSearchES([]))
+    seen = []
+
+    def _fake_resolve(es, index, configured, strict=True, *, retry_cfg):
+        seen.append(retry_cfg)
+        return 1
+    monkeypatch.setattr(read_mod, "_resolve_num_slices", _fake_resolve)
+    cfg = _rcfg(retry_backoff_initial=1)
+    read_mod.read_index(_FakeSpark(), cfg, _Schema([("doc_id", "string")]))
+    assert seen == [cfg]

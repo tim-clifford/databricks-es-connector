@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import math
 import warnings
 from dataclasses import dataclass, field, fields
 from typing import Optional
@@ -114,8 +115,12 @@ class EsConnection:
             raise ValueError("ca_certs is set but verify_certs is False, pick one")
         if self.max_retries_per_request < 0:
             raise ValueError("max_retries_per_request must be >= 0")
-        if self.retry_backoff_initial < 0:
-            raise ValueError("retry_backoff_initial must be >= 0")
+        for name in ("retry_backoff_initial", "retry_backoff_max"):
+            v = getattr(self, name)
+            # A real, finite, non-negative number. bool is an int subclass and NaN passes every `<`
+            # comparison, so both are rejected explicitly rather than failing later at time.sleep().
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+                raise ValueError(f"{name} must be a finite number of seconds >= 0, got {v!r}")
         if self.retry_backoff_max < self.retry_backoff_initial:
             raise ValueError(
                 f"retry_backoff_max ({self.retry_backoff_max}) must be >= retry_backoff_initial "
