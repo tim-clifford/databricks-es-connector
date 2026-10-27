@@ -106,7 +106,7 @@ def test_merge_reconciliation_gap_is_visible():
 
 def test_merge_delete_404_noops_are_not_counted_as_loss():
     # THE distinction `ignored` exists for. 3 rows in: 1 indexed, 2 delete-404 no-ops. Nothing was
-    # lost, so unaccounted must be 0 -- otherwise a raise-on-gap policy would fire on every CDF
+    # lost, so unaccounted must be 0 - otherwise a raise-on-gap policy would fire on every CDF
     # replay batch that deletes an already-absent doc (the common case).
     out = _merge_partition_results([_prow(written=1, ignored=2, total_input=3)])
     assert out["ignored"] == 2

@@ -62,7 +62,7 @@ def check(want: str) -> list[str]:
     if not found:
         problems.append(f"HANDOFF.md: header names no version ({handoff!r})")
     elif want not in found:
-        problems.append(f"HANDOFF.md: header says {found}, expected {want!r} -- {handoff!r}")
+        problems.append(f"HANDOFF.md: header says {found}, expected {want!r} - {handoff!r}")
 
     # 3. every wheel filename reference
     seen_any = False
@@ -80,7 +80,7 @@ def check(want: str) -> list[str]:
     if not seen_any:
         # A silent zero-match would make this gate vacuous, which is the failure mode it exists to
         # prevent. Treat it as a problem so a moved/renamed file cannot disable the check quietly.
-        problems.append("no wheel references found at all -- the globs no longer match anything, "
+        problems.append("no wheel references found at all - the globs no longer match anything, "
                         "so this check is not actually verifying anything")
     return problems
 

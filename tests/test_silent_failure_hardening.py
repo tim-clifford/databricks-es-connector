@@ -341,7 +341,7 @@ def test_a_further_subclass_loses_the_umbrella_but_fails_loudly():
 @pytest.mark.parametrize("name", ["EsConnection", "EsWriteConfig", "EsReadConfig"])
 def test_max_retries_is_advertised_in_the_signature(name):
     # Because it is not a dataclass field, the generated __init__ signature that functools.wraps
-    # copies does not mention it -- so help(), IDE completion and any introspecting tool would hide a
+    # copies does not mention it - so help(), IDE completion and any introspecting tool would hide a
     # supported argument. The wrapper appends it explicitly.
     import databricks_es_connector.config as cfg_mod
     params = inspect.signature(getattr(cfg_mod, name)).parameters
@@ -762,7 +762,7 @@ def test_preflight_covers_every_column_naming_config_field():
 # Item 18: read_index must reject declared types it cannot honor (char/varchar/void)
 #
 # These produce simpleString() tokens ('varchar(10)', 'char(5)', 'void') that no read_coerce branch
-# matches, so the value falls through the unknown-token passthrough untouched -- bypassing the
+# matches, so the value falls through the unknown-token passthrough untouched - bypassing the
 # _reject_non_scalar guard that StringType correctly applies. Proven live: a multi-valued ES field
 # declared varchar reached Spark as a Python list and died with
 # `PySparkNotImplementedError: Invalid return type in mapInPandas`, an error that names neither the

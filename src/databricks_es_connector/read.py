@@ -36,8 +36,8 @@ def _spark_type_token(dtype: "DataType"):
     """Render a pyspark DataType to the token read_transform.read_coerce understands.
 
     A scalar type becomes its lowercase `simpleString()` string ("timestamp", "decimal(10,2)", ...).
-    A container becomes a tuple carrying its already-walked sub-token(s) -- ("array", elem),
-    ("map", key, val), ("struct", [(name, sub), ...]) -- so the coercion layer never re-parses a
+    A container becomes a tuple carrying its already-walked sub-token(s) - ("array", elem),
+    ("map", key, val), ("struct", [(name, sub), ...]) - so the coercion layer never re-parses a
     `struct<...>` DDL string; we hand it the structure the DataType already gives us here.
 
     Containers are recognized structurally (elementType / keyType+valueType / fields) rather than by
@@ -66,7 +66,7 @@ def _reject_non_string_map_keys(field_tokens, _path: str = "") -> None:
     (`to_json`; documented), so a `map` read from `_source` can only ever yield string keys. A
     declared `map<K,V>` with `K` other than `string` therefore cannot be satisfied: mapInPandas would
     fail the Arrow cast to the declared key type (or, on a runtime with an unsafe cast, mis-key
-    SILENTLY). Fail closed here -- once per read on the driver, before any ES round-trip -- naming the
+    SILENTLY). Fail closed here - once per read on the driver, before any ES round-trip - naming the
     fix, rather than letting an opaque per-partition cast error (or silent corruption) surface later.
     Recurses the token tree so a map nested inside a struct/array/map value is caught too. `map`
     VALUES are unaffected (they carry their own value transform); only the KEY type is constrained.

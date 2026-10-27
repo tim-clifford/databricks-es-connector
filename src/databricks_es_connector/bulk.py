@@ -95,7 +95,7 @@ def classify_bulk_result(ok: bool, op_type: str, status: int) -> str:
 # "header\nsource", or a delete "header" with no source), so this writer does no per-row Python
 # shaping or JSON encoding: it batches the pre-built lines and hands them to es.bulk(operations=...).
 # elastic_transport's NdjsonSerializer forwards str/bytes list items VERBATIM (utf-8 + a trailing
-# newline, no json re-encode), so the JVM-built JSON is never re-serialized in Python -- that
+# newline, no json re-encode), so the JVM-built JSON is never re-serialized in Python - that
 # pass-through is the whole point, it is what keeps the work off the GIL.
 
 
@@ -390,7 +390,7 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         _t0 = _t.perf_counter()
         try:
             resp = es.bulk(operations=ops, **kw)
-        except Exception as _e:  # noqa: BLE001  -- record the failed attempt's cost, then re-raise
+        except Exception as _e:  # noqa: BLE001  - record the failed attempt's cost, then re-raise
             _rtt = (_t.perf_counter() - _t0) * 1000.0
             _cpu = (_t.thread_time() - _cpu0) * 1000.0
             _outcome = failure_kind(_e, cfg)
@@ -408,7 +408,7 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         # http_ms is elastic_transport's node-level HTTP wall (resp.meta.duration): request gzip +
         # upload + ES service + response download + full body read, timed just around the socket call.
         # It sits BETWEEN rtt and took, so rtt_ms - http_ms isolates the elasticsearch-py client layer
-        # above the node (response JSON decode + dispatch + GIL park -- exactly what the fast path
+        # above the node (response JSON decode + dispatch + GIL park - exactly what the fast path
         # avoids), and http_ms - took_ms isolates request compression + network transit. None if the
         # response carries no meta.
         _meta = getattr(resp, "meta", None)
@@ -445,15 +445,15 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
     # retry. Re-shipping the whole chunk is correct for every index/upsert (delete-free) write, but
     # differs by id mode: with id_field set a re-shipped doc is an idempotent upsert (same _id,
     # overwritten in place); with auto-generated ids the re-ship RE-CREATES the docs the probe already
-    # wrote, so they are DUPLICATED. That duplication is deliberately accepted -- an auto-id write is
+    # wrote, so they are DUPLICATED. That duplication is deliberately accepted - an auto-id write is
     # already at-least-once (a Spark/stream retry re-creates rows the same way), and the re-ship fires
-    # on ANY probe result that is not a positive "clean" -- and that is a WIDER trigger than a permanent
+    # on ANY probe result that is not a positive "clean" - and that is a WIDER trigger than a permanent
     # rejection. It includes a RETRYABLE 429 (routine ES backpressure): one 429'd doc flips the chunk's
     # `errors` flag to true, so the whole chunk re-ships and every good auto-id doc in it is duplicated,
     # then the full path's per-doc loop retries just the 429'd line. This REGRESSES the old auto-id
     # behavior, which took the full path directly and retried only the 429'd line with NO duplication;
     # under this fast path a common under-load 429 double-writes the chunk (and re-sends it at an
-    # already-throttling cluster). It also includes -- rarely -- a response that omits the top-level
+    # already-throttling cluster). It also includes - rarely - a response that omits the top-level
     # `errors` flag (fails closed to a re-ship, so even a genuinely clean chunk can be duplicated; ES
     # always returns the flag, but a proxy/malformed response might not, and re-verifying is the safe
     # choice). All of this is deliberately accepted for auto-id (duplicates are the caller's expected
@@ -461,9 +461,9 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
     # written count is taken from the re-ship, so reconciliation stays consistent (the duplicates are
     # extra copies in ES, not a miscount).
     # Deletes are one exclusion: a delete-404 is IGNORED (not written), so `errors: false` would not
-    # justify counting the whole chunk as written -- delete-bearing writes always take the full classify
+    # justify counting the whole chunk as written - delete-bearing writes always take the full classify
     # path below. `bypass_fast_path` is the other: a caller opts out of the probe (see EsWriteConfig) to
-    # get exact per-item accounting and avoid the whole-chunk re-ship -- notably for op_type="create",
+    # get exact per-item accounting and avoid the whole-chunk re-ship - notably for op_type="create",
     # where the probe-then-re-ship makes a just-created doc self-409 and miscount (written under,
     # docs_deduped over) on a chunk that mixes new + existing _ids, and for auto-id, where the re-ship
     # duplicates. Both send straight to the full classify path.
@@ -491,7 +491,7 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         # errors true or the flag absent: re-ship in full below to get per-item detail and retry.
 
     # Full path: re-ship for per-item detail + the per-doc 429 retry. Trim the response with filter_path
-    # so ES returns only status + error (+ _id) per item -- exactly the fields the connector reads -- and
+    # so ES returns only status + error (+ _id) per item - exactly the fields the connector reads - and
     # drops the rest of the item metadata (_index/_version/_seq_no/_primary_term/result/_shards). Verified
     # live: the items array is transparent to filter_path, so the op_type key takes a SINGLE wildcard
     # (items.*.status, NOT items.*.*.status, which matches nothing and drops the whole array). `took` only
@@ -521,13 +521,13 @@ def _ship_ndjson_chunk(es, lines, cfg: EsConfig, counts: dict, error_samples: li
         for idx, (op_type, body, ok, outcome) in enumerate(iter_bulk_response_outcomes(items)):
             status = int(body.get("status", 500) or 500)
             # Reject-bucket accounting (bulk_stats only, full path only): count every non-2xx item that is
-            # a real rejection -- EXCLUDING an IGNORED delete-404 no-op -- by status bucket, BEFORE the
+            # a real rejection - EXCLUDING an IGNORED delete-404 no-op - by status bucket, BEFORE the
             # retry decision, so a 429 that later succeeds on retry is still counted as backpressure. A
             # trivial dict increment on a chunk already decoding items; clean chunks never reach it.
             if diag is not None and not ok and outcome != IGNORED:
                 diag[_reject_bucket(status)] += 1
-            # An IGNORED no-op is TERMINAL and must never be retried -- a delete-404, or a create-409
-            # append-only dedup -- even if a caller has (mis)configured its status into
+            # An IGNORED no-op is TERMINAL and must never be retried - a delete-404, or a create-409
+            # append-only dedup - even if a caller has (mis)configured its status into
             # retry_on_doc_status (the README warns against 404/409 there). Re-sending just repeats the
             # same no-op with pointless backoff and inflates docs_retried; the default (429,) never hits
             # this, but the guard makes the no-op terminal regardless of configuration.
@@ -590,18 +590,18 @@ class _PipelinedShipper:
         `max_inflight` chunks (~a few chunks of ~1 KB/doc), not the whole partition. Because
         `max_inflight == max_workers`, submitted tasks are never queued behind a full pool.
       - MERGING the per-task partials happens only on the producer (writer) thread, inside `_drain` /
-        `close`, never on a worker -- that is what lets the shared totals stay lock-free.
+        `close`, never on a worker - that is what lets the shared totals stay lock-free.
 
     Request sizing is now governed SOLELY by `chunk_size` (bounded above by the Arrow batch size),
     independent of `write_concurrency`. The old design strided each batch into `write_concurrency`
     slices before chunking, so a large `chunk_size` produced ~`maxRecordsPerBatch / write_concurrency`
     docs per send; here it is `min(chunk_size, batch_rows)`. For the common case `chunk_size <=
     batch_rows / write_concurrency` the per-send size is identical to before; it differs only when
-    `chunk_size` is set large on purpose (then sends are correspondingly bigger -- the intended knob).
+    `chunk_size` is set large on purpose (then sends are correspondingly bigger - the intended knob).
 
     Fail-closed: `close()` joins every outstanding send and re-raises the FIRST worker exception
     (`f.result()`), so a partial write FAILS the partition rather than reporting the docs a dead worker
-    never sent as a clean success -- the exact silent loss this module exists to prevent.
+    never sent as a clean success - the exact silent loss this module exists to prevent.
     `_ship_ndjson_chunk` itself catches transport errors and counts them (never raises), so in practice
     a worker raises only on a programming error, but the guard is a mandatory backstop, not a nicety:
     dropping it makes a lost partition report success.
@@ -652,7 +652,7 @@ class _PipelinedShipper:
 
     def _drain_one(self):
         """Wait for at least one outstanding send to finish and merge every send that completed. A
-        worker exception surfaces here via `f.result()` and propagates -- failing the partition closed.
+        worker exception surfaces here via `f.result()` and propagates - failing the partition closed.
         Merging happens here, on the producer thread, which is why the shared totals need no lock."""
         from concurrent.futures import wait, FIRST_COMPLETED
         done, self._pending = wait(self._pending, return_when=FIRST_COMPLETED)
@@ -694,7 +694,7 @@ def make_ndjson_partition_writer(cfg: EsConfig):
         import time as _time
         from elasticsearch import Elasticsearch
 
-        # Partition wall clock (bulk_stats only): spans the whole partition -- Arrow batch iteration,
+        # Partition wall clock (bulk_stats only): spans the whole partition - Arrow batch iteration,
         # NDJSON handoff, and shipping (incl. the final join at close and pool shutdown). Compared to
         # the summed send time (send_busy_ms) it gives the effective in-flight concurrency the partition
         # reached (busy/wall ~ 1 means sends ran serially; ~ write_concurrency means fully overlapped),
@@ -767,7 +767,7 @@ def make_ndjson_partition_writer(cfg: EsConfig):
             # Join the worker pool FIRST, then stop the probe. On the SUCCESS path shipper.close()
             # already joined every worker in the try body; but on the EXCEPTION path (the null-line
             # ValueError above, or shipper.feed/close raising) close() never ran, so pool workers can
-            # still be in flight -- and holding the GIL -- right here. Stopping the probe before they are
+            # still be in flight - and holding the GIL - right here. Stopping the probe before they are
             # joined could time out its join (it cannot re-acquire the GIL to see the stop Event), leak
             # the daemon, and race its lag list. pool.shutdown(wait=True) joins them and frees the GIL, so
             # the probe then stops promptly; its samples still cover the whole real ship window either way.
@@ -999,7 +999,7 @@ def _preflight(df, cfg: EsConfig) -> None:
         # every row reads as "not flagged", so NO row is routed to a delete and every intended
         # deletion is applied as an upsert instead. Verified live: deleted=0, errors=0,
         # unaccounted=0, raise_on_error=True passing clean, and the documents that were supposed to
-        # be erased still in the index -- with the flag column itself indexed alongside them.
+        # be erased still in the index - with the flag column itself indexed alongside them.
         # Unconditional (no opt-out knob): has_deletes=True is meaningless without a real flag
         # column, so there is no legitimate configuration this rejects.
         raise ValueError(
@@ -1015,7 +1015,7 @@ def _preflight(df, cfg: EsConfig) -> None:
         # ambiguous flag, so a string/int flag cannot be parsed at the seam. A non-boolean flag would
         # make `flag === true` evaluate to null for every row (string==boolean is a null-yielding type
         # mismatch), so NO row would route to a delete and every intended deletion would silently
-        # become an upsert -- the exact silent loss the column-name check just above exists to prevent.
+        # become an upsert - the exact silent loss the column-name check just above exists to prevent.
         # Enforce the type on the driver instead. df.schema is safe here (sanitize_for_arrow already
         # removed the VARIANT columns that make it throw on Spark Connect); typeName() avoids importing
         # a pyspark type into this module.
@@ -1082,7 +1082,7 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
     rtt_ms >= http_ms >= took_ms: `rtt_ms` is the full es.bulk wall the client observes; `http_ms` is
     elastic_transport's node-level HTTP wall (request gzip + network + ES + response read); `took_ms` is
     Elasticsearch's own service time. So `rtt_ms - http_ms` is the client layer above the node (response
-    JSON decode + dispatch + GIL park -- what the fast path avoids), `http_ms - took_ms` is compression +
+    JSON decode + dispatch + GIL park - what the fast path avoids), `http_ms - took_ms` is compression +
     network transit, and `took_ms` is ES. `bytes_sent` is the uncompressed NDJSON size, so
     bytes_sent/docs_sent is the real per-document size (no extra ES query) and bytes_sent/n_sends the
     per-request size. `send_busy_ms` (summed successful round-trip time) over `partition_wall_ms`
@@ -1104,14 +1104,14 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
     `docs_retried` is the number of documents re-sent because Elasticsearch rejected them with a
     retryable per-item status (429; the whole-request analog is `retry_status_sends`). `rejected_429`
     / `rejected_409` / `rejected_4xx_other` / `rejected_5xx` bucket every non-2xx, non-ignored item
-    response by status, counted on every occurrence -- so a 429 that later succeeds on retry still shows
-    as backpressure -- which distinguishes transient pushback you can retry (429/503) from permanent
+    response by status, counted on every occurrence - so a 429 that later succeeds on retry still shows
+    as backpressure - which distinguishes transient pushback you can retry (429/503) from permanent
     rejections you cannot (400/409). `docs_deduped` counts create-409 append-only dedups (an op_type=
     'create' resend whose _id already existed): a benign no-op, tracked separately from a genuine
     `rejected_409` conflict, so you can watch how many resends the feed is absorbing. All of these are
     populated only on the full (errors) path, so a clean chunk contributes nothing to them.
 
-    `send_cpu_ms` and the gil_wait_ms columns diagnose WHY a round trip is slow -- whether it is a real
+    `send_cpu_ms` and the gil_wait_ms columns diagnose WHY a round trip is slow - whether it is a real
     socket/ES wait or the worker being starved of the GIL (client-side, but indistinguishable from ES
     latency in rtt_ms alone). `send_cpu_ms` is the CPU the worker threads burned inside es.bulk, so
     `send_busy_ms - send_cpu_ms` is the off-CPU send time (socket wait plus GIL stall). `gil_wait_ms`
@@ -1174,7 +1174,7 @@ def bulk_write(df, cfg: EsConfig, *, raise_on_error: bool = False) -> dict:
     # post-task result finalization) versus the pure-Python driver rollup (merge). Reported only under
     # bulk_stats. If a run spends minutes AFTER the write stage's tasks all show complete, this pins
     # whether that time is inside collect (Spark finalization / a straggler task the stage view already
-    # counted) or the driver rollup -- merge is O(partitions) pure Python and should be milliseconds, so
+    # counted) or the driver rollup - merge is O(partitions) pure Python and should be milliseconds, so
     # a large merge_ms would itself be the finding.
     import time as _t
     _c0 = _t.perf_counter()

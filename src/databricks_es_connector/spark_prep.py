@@ -146,7 +146,7 @@ def sanitize_for_arrow(df: "DataFrame") -> "DataFrame":
 # Why this exists: Spark's Arrow export converts a `TimestampType` (an instant) to a naive pandas
 # Timestamp using `spark.sql.session.timeZone`, i.e. the session-LOCAL wall-clock with the zone
 # dropped. If that naive wall-clock were then serialized as-is, the stored epoch would be off by the
-# session's UTC offset under any non-UTC session -- silent timestamp corruption, only surfaced by
+# session's UTC offset under any non-UTC session - silent timestamp corruption, only surfaced by
 # running the datatype test under a non-UTC session.
 #
 # Fix, mirroring how the elasticsearch-hadoop connector stays tz-safe: convert every `TimestampType`

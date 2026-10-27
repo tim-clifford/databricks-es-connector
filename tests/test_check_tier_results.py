@@ -171,8 +171,8 @@ def test_duplicate_names_cannot_pad_a_fixture(tier):
 def test_the_same_test_reported_twice_is_rejected(tier):
     """A duplicate cannot fake coverage (`covered` is a set) but WOULD inflate the printed total.
 
-    Results that are not one entry per test are not a clean record of the run -- typically two runs'
-    output concatenated -- so the count cannot be trusted even though the names all match.
+    Results that are not one entry per test are not a clean record of the run - typically two runs'
+    output concatenated - so the count cannot be trusted even though the names all match.
     """
     problems, _, counted = tier(
         PLAIN, [("TestThing.test_a", "passed"), ("TestThing.test_a", "passed"),

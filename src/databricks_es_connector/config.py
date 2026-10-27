@@ -173,7 +173,7 @@ class EsWriteConfig(EsConnection):
     # in-flight requests grows. Costs one executor thread and up to `write_concurrency` chunks of
     # in-flight docs per partition (the shipper's backpressure bound). Total requests hitting ES at once
     # = (running partitions) * write_concurrency, so raise it gradually and watch for 429s (ES write
-    # queue full) -- if they climb, the ES cluster, not the client, is the ceiling. The per-node HTTP
+    # queue full) - if they climb, the ES cluster, not the client, is the ceiling. The per-node HTTP
     # connection pool is sized to write_concurrency automatically (see client_kwargs), so callers do
     # not also have to raise it.
     write_concurrency: int = 1
@@ -223,7 +223,7 @@ class EsWriteConfig(EsConnection):
     # --- write op type: index (default) vs create ---
     # The `_bulk` action used for every NON-delete row. "index" (default) upserts by _id, so a resend
     # overwrites the existing doc. "create" appends only: Elasticsearch rejects a write whose _id
-    # already exists with a 409, which the connector then treats as an expected no-op -- counted as
+    # already exists with a 409, which the connector then treats as an expected no-op - counted as
     # `ignored` (never an error) and surfaced distinctly as `docs_deduped` under bulk_stats. That gives
     # an APPEND-ONLY feed true idempotency on resend (a redelivered doc is neither overwritten, as
     # "index" would, nor duplicated) and lets Elasticsearch take its cheaper append path (Lucene
@@ -249,7 +249,7 @@ class EsWriteConfig(EsConnection):
 
     # Skip the filter_path="errors" fast-path probe and classify every chunk on the full per-item path
     # (a single send with a trimmed status/_id response, then a per-document 429 retry of only the
-    # rejected lines -- no whole-chunk re-ship). Default False keeps the fast path, whose GIL-avoidance
+    # rejected lines - no whole-chunk re-ship). Default False keeps the fast path, whose GIL-avoidance
     # (no per-item decode on a clean chunk) is the throughput win on wide/large writes. Set True when
     # exact per-item accounting matters more than that decode saving, independent of op_type:
     #   - op_type="create": makes `written` / `docs_deduped` exact on mixed new+existing chunks (see the
@@ -299,8 +299,8 @@ class EsWriteConfig(EsConnection):
             # A flag column set with deletes off would silently do nothing, reject the misconfig
             # rather than let a caller believe deletes are happening.
             raise ValueError("delete_flag_column is set but has_deletes is False, enable has_deletes or drop it")
-        # The remaining delete requirement -- delete_flag_column must be a real BooleanType column, so
-        # build_ndjson can route it in Catalyst via `flag === true` -- needs the DataFrame schema, so
+        # The remaining delete requirement - delete_flag_column must be a real BooleanType column, so
+        # build_ndjson can route it in Catalyst via `flag === true` - needs the DataFrame schema, so
         # it is enforced in bulk._preflight (driver-side, once), not here where only field values exist.
         # op_type governs the non-delete action. Allow-list it (a typo fails closed here rather than
         # emitting a bogus _bulk action ES rejects wholesale), and enforce the two invariants that make

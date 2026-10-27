@@ -37,7 +37,7 @@ class TestWriteConcurrencyRoundtrip(NotebookTestFixture):
     def run_setup(self):
         # chunk_size deliberately small so each partition issues MANY bulk sends (the pipeline spans
         # many chunks); combined with the large per-partition row count (see the df below), sends are
-        # fed to the bounded in-flight pool ACROSS multiple Arrow batches -- the cross-batch continuity
+        # fed to the bounded in-flight pool ACROSS multiple Arrow batches - the cross-batch continuity
         # the shipper adds. We do NOT set arrow.maxRecordsPerBatch (serverless rejects modifying it at
         # runtime); sizing the data above the default batch size achieves the same multi-batch shape.
         self.cfg = EsConfig(hosts=ES_HOSTS, basic_auth=ES_AUTH, verify_certs=False,
@@ -139,7 +139,7 @@ class TestWriteConcurrencyRoundtrip(NotebookTestFixture):
             # thread_time() works on the executor: a real, non-negative CPU figure (never None/error).
             assert isinstance(p["send_cpu_ms"], (int, float)) and p["send_cpu_ms"] >= 0.0, p
             # The probe started and joined cleanly: it reports an integer sample count and a
-            # non-negative total stall (0 is valid -- an I/O-bound write simply saw no GIL contention).
+            # non-negative total stall (0 is valid - an I/O-bound write simply saw no GIL contention).
             assert isinstance(p["gil_wait_samples"], int) and p["gil_wait_samples"] >= 0, p
             assert isinstance(p["gil_wait_ms_total"], (int, float)) and p["gil_wait_ms_total"] >= 0.0, p
             # send_cpu_ms is worker CPU spent inside es.bulk; it cannot exceed the summed round trip.

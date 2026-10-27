@@ -53,8 +53,8 @@ Each fixture owns one concern:
   that distinguishes the fast path from the old per-item full path on auto-id writes.
 - **`test_create_append_only.py`**: live ES. Owns the **`op_type="create"` append-only contract**: a
   first write of N docs lands each once (`written == N`); a resend of the same `_id`s (carrying a
-  changed field value) returns `409` per doc and is treated as an append-only **dedup** -- counted
-  `ignored`, surfaced as `docs_deduped` under `bulk_stats`, NOT an `error` -- so ES still holds exactly
+  changed field value) returns `409` per doc and is treated as an append-only **dedup** - counted
+  `ignored`, surfaced as `docs_deduped` under `bulk_stats`, NOT an `error` - so ES still holds exactly
   N (no duplication) and the stored value is **unchanged** (create did not overwrite, the discriminator
   vs `index`); a mixed resend writes only the one genuinely new `_id`. Proves the Spark-built `create`
   action header end to end (only the tier runs `build_ndjson`).

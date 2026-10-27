@@ -270,7 +270,7 @@ def test_ndjson_writer_reconciles_under_concurrency_with_errors_across_batches(m
 def test_ndjson_writer_null_line_in_later_batch_still_raises(monkeypatch):
     # Cross-batch null-id guard: batch 0 ships fine (its sends may still be in flight), then batch 1
     # carries a null action line (build_ndjson's null/non-finite-id signal). The per-batch guard runs
-    # BEFORE each batch is fed, so the writer still RAISES and fails the partition -- pipelining must
+    # BEFORE each batch is fed, so the writer still RAISES and fails the partition - pipelining must
     # not let a later null id slip through as `unaccounted`.
     pd = pytest.importorskip("pandas")
     import elasticsearch
@@ -300,7 +300,7 @@ def test_ship_chunk_transport_error_counts_errors_not_crash():
 
 def test_config_accepts_deletes():
     # The write path builds delete actions; the config accepts has_deletes + a flag column. The
-    # remaining requirement -- the flag column must be boolean -- needs the DataFrame schema and is
+    # remaining requirement - the flag column must be boolean - needs the DataFrame schema and is
     # enforced in bulk._preflight, not here.
     cfg = EsConfig(hosts="https://h:9200", basic_auth=("u", "p"), index="i", id_field="id",
                    has_deletes=True, delete_flag_column="d")
@@ -415,7 +415,7 @@ def test_epoch_type_maps_date_ntz_to_long_recursively():
 # delete. build_ndjson itself needs live Spark (the end-to-end path is proven in the integration
 # tier); this covers the driver-side TYPE check that gates it. _preflight reads only df.columns and
 # df.schema.fields[*].{name, dataType.typeName()}, so a stand-in exercises the check without pyspark
-# (unavailable on this Python) -- the real schema is proven live in test_deletes_roundtrip.
+# (unavailable on this Python) - the real schema is proven live in test_deletes_roundtrip.
 
 class _FakeDataType:
     """Mirrors the pyspark DataType methods _preflight reads: typeName() / simpleString()."""
@@ -499,7 +499,7 @@ def test_pipelined_shipper_ships_all_lines_exactly_once():
     es = _ThreadSafeFakeES()
     lines = [f"L{i}" for i in range(10)]
     counts, _ = _run_shipper(es, [lines], _cfg(id_field=None, write_concurrency=3, chunk_size=2))
-    # every line shipped exactly once across the in-flight sends -- no drops, no duplicates
+    # every line shipped exactly once across the in-flight sends - no drops, no duplicates
     assert sorted(es.all_ops) == sorted(lines) and len(es.all_ops) == 10
     assert counts["written"] == 10 and counts["errors"] == 0
 
@@ -521,7 +521,7 @@ def test_pipelined_shipper_concurrency_matches_serial_tally():
 
 def test_pipelined_shipper_carries_across_batches_no_loss():
     # The core new guarantee: sends carry across Arrow-batch boundaries (no per-batch join), and EVERY
-    # line of EVERY batch is shipped exactly once with correct counts -- no loss, no dupe across the
+    # line of EVERY batch is shipped exactly once with correct counts - no loss, no dupe across the
     # boundary. Three batches of differing, chunk-straddling sizes.
     es = _ThreadSafeFakeES()
     batches = [[f"b0_{i}" for i in range(5)],
@@ -769,7 +769,7 @@ def test_fast_path_applies_without_id_field():
     # Auto-id (no id_field) is delete-free, so it takes the fast path too: a clean chunk is ONE minimal
     # probe (filter_path="errors"), every line counted written, no per-item decode and no re-ship. (The
     # error branch may re-ship and duplicate the probe's writes; that is tested separately and accepted
-    # -- an auto-id write is already at-least-once.)
+    # - an auto-id write is already at-least-once.)
     es = _RecordingES([{"errors": False}])
     counts = {"written": 0, "deleted": 0, "ignored": 0, "errors": 0}
     _ship_ndjson_chunk(es, ["a", "b"], _cfg(id_field=None), counts, [])
@@ -796,8 +796,8 @@ def test_fast_path_without_id_field_reships_full_on_error():
 
 def test_fast_path_without_id_field_transient_429_reships_whole_chunk_then_retries_line():
     # Documented regression (accepted): a single retryable 429 flips the probe's `errors` flag, so the
-    # WHOLE auto-id chunk re-ships -- re-sending (and thus duplicating in ES) the good docs too, not just
-    # the 429'd line -- and only then does the per-doc loop retry the 429'd line. The old auto-id path
+    # WHOLE auto-id chunk re-ships - re-sending (and thus duplicating in ES) the good docs too, not just
+    # the 429'd line - and only then does the per-doc loop retry the 429'd line. The old auto-id path
     # took the full path directly and retried only that line with no whole-chunk re-ship. The assertion
     # that es.calls[1] carries ALL three lines (not just "b") is the duplication: "a" and "c" succeeded
     # on the probe and are re-sent on the re-ship.
@@ -1007,7 +1007,7 @@ def test_gil_wait_probe_stop_returns_independent_snapshot():
 
 def test_gil_wait_probe_quiet_when_idle():
     # With no thread hogging the GIL (the main thread is blocked in sleep, which RELEASES the GIL), the
-    # probe wakes on time and records at most minor scheduler jitter -- never a large stall. This is the
+    # probe wakes on time and records at most minor scheduler jitter - never a large stall. This is the
     # write_concurrency==1 / uncontended shape, where gil_wait must read ~0.
     import time
     from databricks_es_connector.bulk import _GilWaitProbe
@@ -1692,7 +1692,7 @@ def test_bulk_stats_diag_keys_agree_across_new_diag_and_stat_keys():
     # Lock the invariant the comments on _DIAG_KEYS / _STAT_KEYS state: every full-path diag key must
     # be produced by _new_diag() and carried in _STAT_KEYS (which now splices *_DIAG_KEYS in, so this
     # holds by construction and this test catches a future hand-edit that breaks it). The remaining
-    # leg -- _STAT_KEYS vs the bulk_write summary_schema string -- is enforced at runtime by mapInPandas
+    # leg - _STAT_KEYS vs the bulk_write summary_schema string - is enforced at runtime by mapInPandas
     # in the integration tier (a missing/extra column fails the write), which cannot be reached offline.
     from databricks_es_connector.bulk import _new_diag, _DIAG_KEYS, _STAT_KEYS
     assert set(_new_diag()) == set(_DIAG_KEYS)

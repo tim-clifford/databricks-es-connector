@@ -6,8 +6,8 @@
 # MAGIC equal the originals, **except** the deltas the README documents as one-way (decimal
 # MAGIC precision, sub-millisecond timestamp, float32 widening). This proves the read coercion layer
 # MAGIC (`read_coerce`) is the true inverse of the write path (build_ndjson / to_json) against real
-# MAGIC Elasticsearch. With the pure-Python write transform gone, this live round-trip -- not an
-# MAGIC offline oracle -- is where write↔read fidelity is proven end to end.
+# MAGIC Elasticsearch. With the pure-Python write transform gone, this live round-trip - not an
+# MAGIC offline oracle - is where write↔read fidelity is proven end to end.
 # MAGIC
 # MAGIC Exercises the distributed sliced-scroll `read_index` across three shapes: default fan-out,
 # MAGIC multi-slice fan-out over a 3-shard index, and a single-slice (`num_slices=1`) multi-PAGE read
@@ -203,7 +203,7 @@ class TestReadRoundtrip(NotebookTestFixture):
     def test_high_precision_decimal_via_string_is_exact(self):
         # DOCUMENTED workaround: casting a high-precision decimal to STRING in Spark before writing
         # preserves exactness past double's ~15-17 sig figs. Read back as StringType, the 18-digit
-        # value must be exact -- unlike s_decimal_hi in test_datatype_coverage, which loses low digits
+        # value must be exact - unlike s_decimal_hi in test_datatype_coverage, which loses low digits
         # because it goes through float. This proves the mitigation the README recommends.
         assert self.out_rows["r1"]["s_decimal_exact_str"] == "123456789012345678"
         assert self.out_rows["r2"]["s_decimal_exact_str"] == "-98765432109876543"
