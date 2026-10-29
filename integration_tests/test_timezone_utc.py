@@ -3,8 +3,8 @@
 # MAGIC # Integration: timestamp epoch is session-timezone-independent
 # MAGIC Pins the timezone contract from both sides against live ES:
 # MAGIC
-# MAGIC 1. **UTC session (regression guard):** a `timestamp` -- top-level AND nested in
-# MAGIC    struct/array/map -- must store its TRUE UTC instant and read back exactly.
+# MAGIC 1. **UTC session (regression guard):** a `timestamp` - top-level AND nested in
+# MAGIC    struct/array/map - must store its TRUE UTC instant and read back exactly.
 # MAGIC 2. **Non-UTC session (the fix):** the SAME instants written under `America/New_York` must
 # MAGIC    store the SAME epoch as under UTC. Before the fix (spark_prep.normalize_timestamps_for_utc)
 # MAGIC    the non-UTC epoch was shifted by the session offset (-5h); after it, the two agree.

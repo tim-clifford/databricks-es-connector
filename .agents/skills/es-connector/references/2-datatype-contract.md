@@ -26,7 +26,7 @@ breaks. This checklist is the connector's most important review gate.
    delta>` if one-way) for a fast red-before-green on the read inverse; add positive AND edge cases
    (null, empty container, nesting, the boundary that makes it one-way).
 
-4. **An `integration_tests/` fixture** (live Spark + ES) -- the write<->read oracle
+4. **An `integration_tests/` fixture** (live Spark + ES) - the write<->read oracle
    Prove it end-to-end, because `tests/` can't run `to_json`, Spark's Arrow conversion, or ES itself.
    Usually `test_datatype_coverage.py` (the wide one-row-per-type matrix) and/or
    `test_read_roundtrip.py`. For timestamps, also `test_timezone_utc.py` under a non-UTC session.

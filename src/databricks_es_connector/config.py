@@ -16,24 +16,26 @@ code keeps working; new code should name the read/write config explicitly.
 
 RETRIES: ONE UMBRELLA OR TWO LAYERS
 -----------------------------------
-Elasticsearch can fail a write in two independent places, so there are two retry layers:
+The connector owns every retry (see retry.py); the Elasticsearch client is always built with its own
+transport retries disabled. Elasticsearch can fail a write in two independent places, so there are two
+retry layers:
 
-  transport_max_retries   a whole HTTP REQUEST failed (connection reset, LB 503, gateway timeout,
-                          or a 429 on the bulk call itself). Re-sends the entire request. Applies to
-                          reads and writes. -> elastic_transport.Transport
-  max_retries_per_doc     ONE DOCUMENT inside a successful request was rejected (429, ES write queue
-                          full). Re-sends only the failed subset. Writes only.
-                          -> bulk._ship_ndjson_chunk
+  max_retries_per_request  a whole HTTP REQUEST failed (timeout, connection refused or reset, or an
+                           HTTP status in request_retry_status_list, e.g. a 429 from indexing
+                           pressure). Re-sends the entire request. Applies to reads and writes.
+                           -> retry.call_with_retries
+  max_retries_per_doc      ONE DOCUMENT inside a successful request was rejected (429, ES write queue
+                           full). Re-sends only the failed subset. Writes only.
+                           -> bulk._ship_ndjson_chunk
 
 They exist separately because the `_bulk` API answers **HTTP 200 even when documents inside it
-fail**: the per-item statuses live in the response body, which the transport layer never inspects.
-A 429 therefore means different things at each layer, and only the per-document one loses data
-quietly.
+fail**: the per-item statuses live in the response body, not the HTTP status. A 429 therefore means
+different things at each layer.
 
 Configure them either way, but not both ways at once:
 
     EsWriteConfig(..., max_retries=5)                 # UMBRELLA: 5 at every layer
-    EsWriteConfig(..., transport_max_retries=5,       # GRANULAR: tune each layer
+    EsWriteConfig(..., max_retries_per_request=5,     # GRANULAR: tune each layer
                        max_retries_per_doc=2)
 
 `max_retries` is a constructor-level convenience, not a stored field: it expands into the real
@@ -41,24 +43,27 @@ per-layer fields. Passing it together with either per-layer field raises, so the
 count never depends on an invisible precedence rule. Reading `cfg.max_retries` gives the shared value
 when the layers agree, and `None` when they were set granularly (there is no single number to report).
 
-One asymmetry worth knowing before raising the umbrella: per-document retries sleep BLOCKINGLY in the
-executor with exponential backoff (elasticsearch-py: 2s, doubling, capped at 600s), so
-`max_retries=8` is up to ~8.5 minutes of sleep per partition, while the same value costs the
-transport layer almost nothing. Prefer the granular form when you need a high transport count.
-
-A third, OPT-IN behavior sits beside these two layers: `EsWriteConfig.retry_transport_timeout` moves
-the whole-REQUEST timeout retry out of the transport and into the connector, so a timed-out bulk is
-re-sent with backoff from connector code instead of being re-sent invisibly by the transport and then
-failing the write. It reuses `transport_max_retries` as its budget and leaves connection-reset and
-429/503 retries with the transport. See that field.
+Both layers wait between attempts with the same exponential backoff,
+`min(retry_backoff_initial * 2**(n-1), retry_backoff_max)` (defaults 2s, 4s, 8s, ... capped at 30s), and
+the wait sleeps BLOCKINGLY in the executor thread. With the defaults, `max_retries=8` is up to 150s of
+sleep for one send (2 + 4 + 8 + 16 + 30 * 4). A chunk can make several sends (the fast-path probe, the
+full-path re-send, and one per per-document retry round), each with its own whole-request budget, so its
+worst case is a multiple of that; raise the retry counts with that cost in mind.
 """
 from __future__ import annotations
 
 import functools
 import inspect
+import math
+import re
 import warnings
 from dataclasses import dataclass, field, fields
 from typing import Optional
+
+
+# Upper bound on retry_backoff_initial / retry_backoff_max: one day. A single wait longer than that is a
+# configuration mistake, and an absurd value (e.g. 1e308) would otherwise fail only at time.sleep().
+MAX_RETRY_BACKOFF_SECONDS = 86400
 
 
 @dataclass(frozen=True)
@@ -79,18 +84,35 @@ class EsConnection:
     # --- client tuning (apply to both read and write requests) ---
     http_compress: bool = True              # gzip both ways: request body on write, ES response on read
     request_timeout: int = 60
-    # TRANSPORT-level retries: they fire on the HTTP status of a whole REQUEST (a connection reset, a
-    # load-balancer 503, a gateway timeout, or a 429 on the bulk call itself), and they re-send the
-    # ENTIRE request. They do NOT retry an individual rejected document, because the `_bulk` API
-    # answers HTTP 200 even when items inside it fail: the per-item statuses live in the response
-    # BODY, which the transport layer never inspects. Per-document retries are
-    # `EsWriteConfig.max_retries_per_doc`.
+
+    # --- retries (connector-managed; see retry.py) ---
+    # Whole-REQUEST retries: a request that timed out, could not connect (refused, reset, DNS, TLS), or
+    # answered an HTTP status in request_retry_status_list is re-sent in full, up to this many times,
+    # waiting with the backoff below. Applies to every ES call the connector makes (writes, reads and
+    # the driver-side checks). They do NOT retry an individual rejected document, because the `_bulk`
+    # API answers HTTP 200 even when items inside it fail; per-document retries are
+    # `EsWriteConfig.max_retries_per_doc`. 0 disables whole-request retries.
     #
     # `max_retries` is the UMBRELLA that sets both layers at once (see the module docstring). Leave
-    # this field alone and set `max_retries` for one simple knob; set this one to tune the transport
-    # layer independently. Setting both is rejected, so the effective value is never ambiguous.
-    transport_max_retries: int = 3
+    # this field alone and set `max_retries` for one simple knob; set this one to tune the
+    # whole-request layer independently. Setting both is rejected, so the effective value is never
+    # ambiguous.
+    max_retries_per_request: int = 3
+    # Whether a request that exceeded request_timeout is retried. A timed-out request has an UNKNOWN
+    # outcome, so a re-sent write re-applies it: an idempotent upsert with id_field set, a duplicate
+    # with auto-generated ids (at-least-once). Set False to fail a timed-out request on its first
+    # attempt instead.
     retry_on_timeout: bool = True
+    # Backoff between retries, for both layers: retry n waits
+    # min(retry_backoff_initial * 2**(n-1), retry_backoff_max) seconds, so the defaults give 2s, 4s,
+    # 8s, ... capped at 30s. The wait blocks the executor thread that is sending.
+    retry_backoff_initial: float = 2.0
+    retry_backoff_max: float = 30.0
+    # HTTP statuses on a whole request that are retried. 429 is Elasticsearch rejecting the entire
+    # request (indexing pressure); 502/503/504 are a proxy or node that is briefly unavailable. Each
+    # entry must be an HTTP error status (400-599). Empty means no status is retried (timeouts and
+    # connection errors still are).
+    request_retry_status_list: tuple = (429, 502, 503, 504)
 
     def __post_init__(self):
         if not self.hosts:
@@ -99,8 +121,33 @@ class EsConnection:
             raise ValueError("EsConfig requires either api_key or basic_auth")
         if self.verify_certs is False and self.ca_certs:
             raise ValueError("ca_certs is set but verify_certs is False, pick one")
-        if self.transport_max_retries < 0:
-            raise ValueError("transport_max_retries must be >= 0")
+        if self.max_retries_per_request < 0:
+            raise ValueError("max_retries_per_request must be >= 0")
+        for name in ("retry_backoff_initial", "retry_backoff_max"):
+            v = getattr(self, name)
+            # A real, finite, non-negative number. bool is an int subclass and NaN passes every `<`
+            # comparison, so both are rejected explicitly rather than failing later at time.sleep().
+            if (isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                    or not 0 <= v <= MAX_RETRY_BACKOFF_SECONDS):
+                raise ValueError(
+                    f"{name} must be a number of seconds from 0 to {MAX_RETRY_BACKOFF_SECONDS}, got {v!r}")
+        if self.retry_backoff_max < self.retry_backoff_initial:
+            raise ValueError(
+                f"retry_backoff_max ({self.retry_backoff_max}) must be >= retry_backoff_initial "
+                f"({self.retry_backoff_initial})")
+        statuses = self.request_retry_status_list
+        if isinstance(statuses, (str, bytes)) or not hasattr(statuses, "__iter__"):
+            raise ValueError(
+                f"request_retry_status_list must be a list of HTTP status codes, got {statuses!r}")
+        statuses = tuple(statuses)
+        for s in statuses:
+            # bool is an int subclass; True would silently mean status 1, so reject it explicitly.
+            if isinstance(s, bool) or not isinstance(s, int) or not 400 <= s <= 599:
+                raise ValueError(
+                    f"request_retry_status_list entries must be HTTP error statuses (int 400-599), "
+                    f"got {s!r}")
+        # Stored as a tuple so the frozen config stays hashable whatever sequence the caller passed.
+        object.__setattr__(self, "request_retry_status_list", statuses)
 
     def client_kwargs(self) -> dict:
         """Kwargs for elasticsearch.Elasticsearch(...). Built on the executor."""
@@ -108,10 +155,9 @@ class EsConnection:
             "hosts": self.hosts,
             "http_compress": self.http_compress,
             "request_timeout": self.request_timeout,
-            # The elasticsearch-py client's own kwarg is still called `max_retries`; only OUR field
-            # was renamed. This is the one place the two spellings meet.
-            "max_retries": self.transport_max_retries,
-            "retry_on_timeout": self.retry_on_timeout,
+            # The transport never retries: every retry is connector-managed (retry.call_with_retries),
+            # with backoff. Left on, the transport would re-send immediately and stack under ours.
+            "max_retries": 0,
             "verify_certs": self.verify_certs,
         }
         if self.api_key is not None:
@@ -142,37 +188,19 @@ class EsWriteConfig(EsConnection):
     # in-flight requests grows. Costs one executor thread and up to `write_concurrency` chunks of
     # in-flight docs per partition (the shipper's backpressure bound). Total requests hitting ES at once
     # = (running partitions) * write_concurrency, so raise it gradually and watch for 429s (ES write
-    # queue full) -- if they climb, the ES cluster, not the client, is the ceiling. The per-node HTTP
+    # queue full) - if they climb, the ES cluster, not the client, is the ceiling. The per-node HTTP
     # connection pool is sized to write_concurrency automatically (see client_kwargs), so callers do
     # not also have to raise it.
     write_concurrency: int = 1
 
     # Per-DOCUMENT retries for rows Elasticsearch rejects with a retryable status (429
     # es_rejected_execution_exception: the ES write queue is full). This is NOT the same as
-    # EsConnection.max_retries, which is transport-level and only fires on the HTTP status of the
-    # whole request: the _bulk API returns HTTP 200 even when individual items fail, so the
-    # transport retry never sees a rejected document. Without this, a 429'd row is a hard error on
-    # its first and only attempt. Backoff is exponential (elasticsearch-py: initial_backoff * 2**n).
+    # EsConnection.max_retries_per_request, which fires on a failed whole REQUEST: the _bulk API
+    # returns HTTP 200 even when individual items fail, so the whole-request retry never sees a
+    # rejected document. Without this, a 429'd row is a hard error on its first and only attempt.
+    # Waits with the same backoff as whole-request retries (retry_backoff_initial / retry_backoff_max).
     max_retries_per_doc: int = 3
     retry_on_doc_status: tuple = (429,)     # per-doc statuses worth retrying (429 = ES queue full)
-
-    # Whole-REQUEST timeout retries, owned by the connector instead of the transport. A bulk send that
-    # exceeds request_timeout raises ConnectionTimeout; by default (retry_on_timeout=True) elasticsearch-py
-    # re-sends the WHOLE request up to transport_max_retries times, immediately (no backoff) and invisibly
-    # to bulk_stats and the error counts, so a slow send can burn (1 + transport_max_retries) * request_timeout
-    # before a surfaced timeout fails the write (task/batch) and Spark re-runs everything -- a latency-bound
-    # pipeline then falls further behind. Set True to move that retry INTO the connector: the write client
-    # is built with retry_on_timeout=False (this knob takes precedence over the retry_on_timeout field
-    # below), and bulk._ship_ndjson_chunk re-sends a timed-out chunk up to transport_max_retries times with
-    # exponential backoff -- in connector code with a bounded budget, not the transport's hidden immediate
-    # re-sends -- before falling closed into errors exactly as before.
-    # request_timeout is NOT shortened. Only ConnectionTimeout is retried this way; connection resets
-    # (ConnectionError) and 429/502/503/504 on the bulk call itself stay with the transport, and every other
-    # error still fails closed on its first attempt. A timed-out send is an UNKNOWN outcome, so the re-send
-    # re-applies the chunk: with id_field an idempotent upsert (safe); with auto-generated ids a re-create,
-    # which DUPLICATES (at-least-once) -- the same trade-off as the fast-path reship and as the default
-    # retry_on_timeout=True already carries today. Off by default; opt in per write.
-    retry_transport_timeout: bool = False
 
     # Diagnostics: when True, time every individual `es.bulk` send and surface PER-PARTITION
     # aggregates (send count, docs/send, and client round-trip vs ES `took` distributions) on the
@@ -210,7 +238,7 @@ class EsWriteConfig(EsConnection):
     # --- write op type: index (default) vs create ---
     # The `_bulk` action used for every NON-delete row. "index" (default) upserts by _id, so a resend
     # overwrites the existing doc. "create" appends only: Elasticsearch rejects a write whose _id
-    # already exists with a 409, which the connector then treats as an expected no-op -- counted as
+    # already exists with a 409, which the connector then treats as an expected no-op - counted as
     # `ignored` (never an error) and surfaced distinctly as `docs_deduped` under bulk_stats. That gives
     # an APPEND-ONLY feed true idempotency on resend (a redelivered doc is neither overwritten, as
     # "index" would, nor duplicated) and lets Elasticsearch take its cheaper append path (Lucene
@@ -236,7 +264,7 @@ class EsWriteConfig(EsConnection):
 
     # Skip the filter_path="errors" fast-path probe and classify every chunk on the full per-item path
     # (a single send with a trimmed status/_id response, then a per-document 429 retry of only the
-    # rejected lines -- no whole-chunk re-ship). Default False keeps the fast path, whose GIL-avoidance
+    # rejected lines - no whole-chunk re-ship). Default False keeps the fast path, whose GIL-avoidance
     # (no per-item decode on a clean chunk) is the throughput win on wide/large writes. Set True when
     # exact per-item accounting matters more than that decode saving, independent of op_type:
     #   - op_type="create": makes `written` / `docs_deduped` exact on mixed new+existing chunks (see the
@@ -253,18 +281,18 @@ class EsWriteConfig(EsConnection):
         if self.write_concurrency < 1:
             raise ValueError("EsWriteConfig.write_concurrency must be >= 1")
         # The `max_retries` umbrella cannot produce this combination (it sets both layers to the same
-        # value), so reaching here means the layers were configured GRANULARLY: the transport layer
-        # was hardened while per-document retries were switched off. That is almost certainly not
+        # value), so reaching here means the layers were configured GRANULARLY: the whole-request
+        # layer was hardened while per-document retries were switched off. That is almost certainly not
         # what someone protecting against ES backpressure intended, because per-document retries are
         # the only ones that cover a 429'd document (the _bulk API returns HTTP 200 even when items
-        # inside it fail, so the transport retry never sees them). Warn rather than raise: the
+        # inside it fail, so the whole-request retry never sees them). Warn rather than raise: the
         # combination is legal and might be deliberate, just very unlikely.
-        if self.max_retries_per_doc == 0 and self.transport_max_retries > 3:
+        if self.max_retries_per_doc == 0 and self.max_retries_per_request > 3:
             warnings.warn(
-                f"transport_max_retries={self.transport_max_retries} is raised above the default but "
-                "max_retries_per_doc=0, so documents Elasticsearch rejects with a 429 get NO "
+                f"max_retries_per_request={self.max_retries_per_request} is raised above the default "
+                "but max_retries_per_doc=0, so documents Elasticsearch rejects with a 429 get NO "
                 "retries. The _bulk API returns HTTP 200 even when individual items fail, so "
-                "transport-level retries never see them. Set max_retries_per_doc, or use "
+                "whole-request retries never see them. Set max_retries_per_doc, or use "
                 "max_retries=<n> to set both layers at once.",
                 # stacklevel=4, not 3: __post_init__ <- generated __init__ <- the umbrella wrapper
                 # <- the caller. The wrapper added a frame, so 3 pointed inside config.py, which
@@ -286,8 +314,8 @@ class EsWriteConfig(EsConnection):
             # A flag column set with deletes off would silently do nothing, reject the misconfig
             # rather than let a caller believe deletes are happening.
             raise ValueError("delete_flag_column is set but has_deletes is False, enable has_deletes or drop it")
-        # The remaining delete requirement -- delete_flag_column must be a real BooleanType column, so
-        # build_ndjson can route it in Catalyst via `flag === true` -- needs the DataFrame schema, so
+        # The remaining delete requirement - delete_flag_column must be a real BooleanType column, so
+        # build_ndjson can route it in Catalyst via `flag === true` - needs the DataFrame schema, so
         # it is enforced in bulk._preflight (driver-side, once), not here where only field values exist.
         # op_type governs the non-delete action. Allow-list it (a typo fails closed here rather than
         # emitting a bogus _bulk action ES rejects wholesale), and enforce the two invariants that make
@@ -317,14 +345,6 @@ class EsWriteConfig(EsConnection):
         kw = super().client_kwargs()
         if self.write_concurrency > 1:
             kw["connections_per_node"] = self.write_concurrency
-        # When the connector owns whole-request timeout retries (retry_transport_timeout), disable the
-        # transport's own timeout re-sends so the two layers do not stack (each transport re-send waits a
-        # full request_timeout, invisibly). This deliberately OVERRIDES the retry_on_timeout field:
-        # retry_transport_timeout is the higher-level switch and moving the retry into the connector is the
-        # whole point. Non-timeout transport retries (ConnectionError, and the retry_on_status codes
-        # 429/502/503/504) are unaffected -- they keep firing up to transport_max_retries at the transport.
-        if self.retry_transport_timeout:
-            kw["retry_on_timeout"] = False
         return kw
 
 
@@ -361,11 +381,43 @@ class EsReadConfig(EsConnection):
             raise ValueError("EsReadConfig.batch_size must be positive")
         if self.num_slices is not None and self.num_slices < 1:
             raise ValueError("EsReadConfig.num_slices must be >= 1 when set")
+        # A failed page is retried, and the PIT is only kept alive by touching it. If the backoff waits
+        # for one page alone reached pit_keep_alive, the PIT would certainly expire mid-retry (the next
+        # attempt gets a 404, not retryable, failing the read), so reject that configuration up front.
+        # The failed attempts themselves also take time (up to request_timeout each, for a timeout), but
+        # that risk exists without any retry (one slow request can outlive a short keep-alive), so it is
+        # documented rather than enforced: enforcing it would reject the common pit_keep_alive="1m" at the
+        # default request_timeout of 60s.
+        from .retry import total_backoff_seconds
+        keep_alive_s = _es_duration_seconds(self.pit_keep_alive, "EsReadConfig.pit_keep_alive")
+        wait_s = total_backoff_seconds(self.max_retries_per_request, self)
+        if wait_s >= keep_alive_s:
+            raise ValueError(
+                f"the retry backoff for one page ({wait_s:g}s: max_retries_per_request="
+                f"{self.max_retries_per_request}, retry_backoff_initial={self.retry_backoff_initial}, "
+                f"retry_backoff_max={self.retry_backoff_max}) is not below pit_keep_alive="
+                f"{self.pit_keep_alive!r} ({keep_alive_s:g}s), so the point-in-time would expire while a "
+                "page is being retried. Raise pit_keep_alive or lower the retry settings.")
+
+
+# Elasticsearch's time units, in seconds. An allow-list: any other unit is rejected rather than guessed.
+_ES_TIME_UNITS = {"d": 86400.0, "h": 3600.0, "m": 60.0, "s": 1.0, "ms": 1e-3, "micros": 1e-6,
+                  "nanos": 1e-9}
+_ES_DURATION_RE = re.compile(r"(\d+)(d|h|m|s|ms|micros|nanos)")
+
+
+def _es_duration_seconds(value, where: str) -> float:
+    """Seconds in an Elasticsearch time value such as "5m" or "90s"; raises ValueError on anything else.
+    Trimmed and lowercased first, as Elasticsearch does, so "5M" is accepted like ES accepts it."""
+    m = _ES_DURATION_RE.fullmatch(value.strip().lower()) if isinstance(value, str) else None
+    if m is None:
+        raise ValueError(f"{where} must be an Elasticsearch time value such as '5m' or '90s', got {value!r}")
+    return int(m.group(1)) * _ES_TIME_UNITS[m.group(2)]
 
 
 # The per-layer fields `max_retries` fans out to. Only the ones a class actually HAS are set, so the
 # umbrella works on EsReadConfig (no per-document layer exists for a read) as well as write configs.
-_RETRY_LAYER_FIELDS = ("transport_max_retries", "max_retries_per_doc")
+_RETRY_LAYER_FIELDS = ("max_retries_per_request", "max_retries_per_doc")
 
 
 def _support_max_retries_umbrella(cls):
@@ -374,7 +426,7 @@ def _support_max_retries_umbrella(cls):
     Two ways to configure retries, and you pick one:
 
       EsWriteConfig(..., max_retries=5)                  # simple: 5 at both layers
-      EsWriteConfig(..., transport_max_retries=5,        # granular: tune each layer
+      EsWriteConfig(..., max_retries_per_request=5,      # granular: tune each layer
                          max_retries_per_doc=2)
 
     Mixing them is REJECTED rather than resolved by precedence. If `max_retries=5` and

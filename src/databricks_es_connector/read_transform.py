@@ -79,7 +79,7 @@ _BOOL_FALSE_STRINGS = ("false", "f", "0", "no", "n")
 
 # Declared Spark types the reader cannot honor, mapped to the fix. Their simpleString() tokens match
 # no branch below, so before this check they fell through the unknown-token passthrough with the
-# value UNTOUCHED -- skipping even the _reject_non_scalar guard that "string" applies. Spark then
+# value UNTOUCHED - skipping even the _reject_non_scalar guard that "string" applies. Spark then
 # rejects the column from mapInPandas with `Invalid return type`, naming neither the field nor the
 # real cause. Failing here names both.
 _UNSUPPORTED_SCALAR_TOKENS = {
@@ -109,7 +109,7 @@ def _reject_unsupported_token(t: str, target: Any) -> None:
 #
 # KEYED ON THE TOKENS read.py ACTUALLY PRODUCES. read._spark_type_token renders a scalar via
 # pyspark `DataType.simpleString()`, which emits `tinyint`/`smallint`/`int`/`bigint` for
-# ByteType/ShortType/IntegerType/LongType -- NOT `byte`/`short`/`integer`/`long`. Keying on the
+# ByteType/ShortType/IntegerType/LongType - NOT `byte`/`short`/`integer`/`long`. Keying on the
 # latter left the two NARROWEST widths (tinyint/smallint), where overflow is most likely, matching
 # no branch at all: a ByteType column fell through to the unknown-token passthrough with the value
 # untouched, defeating this guard AND the truncation guard AND the int() coercion itself. The
@@ -279,7 +279,7 @@ def read_coerce(value: Any, target: Any) -> Any:
             #
             # An empty/whitespace string does NOT parse to False here: the caller has DECLARED this
             # column boolean and ES stored a string, so "" is a value that does not parse, not an
-            # absence -- a genuine null reads as None several branches above and never reaches here.
+            # absence - a genuine null reads as None several branches above and never reaches here.
             # Returning False would invent a datum the source does not contain, in the one column type
             # where nobody re-checks.
             s = value.strip().lower()

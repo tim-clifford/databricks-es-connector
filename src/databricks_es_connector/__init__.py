@@ -35,4 +35,4 @@ __all__ = [
     "ReadSchemaMismatch",   # stored ES value does not fit the declared Spark type
 ]
 
-__version__ = "0.10.0"
+__version__ = "1.0.0"

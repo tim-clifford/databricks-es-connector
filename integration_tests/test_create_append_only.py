@@ -6,7 +6,7 @@
 # MAGIC
 # MAGIC 1. **First write** of N docs: every `create` succeeds, ES holds exactly N and `written == N`.
 # MAGIC 2. **Resend of the same `_id`s with a CHANGED field value**: every doc returns `409` (already
-# MAGIC    exists) and is treated as an append-only **dedup** -- counted `ignored`, surfaced as
+# MAGIC    exists) and is treated as an append-only **dedup** - counted `ignored`, surfaced as
 # MAGIC    `docs_deduped` under `bulk_stats`, and specifically NOT an `error`. ES still holds exactly N
 # MAGIC    (no duplication) and the stored value is **unchanged** (the create did not overwrite). This is
 # MAGIC    what distinguishes `create` from `index`: `index` would overwrite with the changed value and
@@ -88,7 +88,7 @@ class TestCreateAppendOnly(NotebookTestFixture):
         self.v_after_resend = _source(INDEX, 1)["v"]
 
         # 3. Mixed resend: one NEW id (N+1) plus the existing ids, forced into ONE chunk (repartition(1))
-        #    so the new doc SHARES a chunk with existing docs -- the exact case that miscounts under the
+        #    so the new doc SHARES a chunk with existing docs - the exact case that miscounts under the
         #    default fast path. bypass_fast_path=True classifies the chunk on one full-path send, so the
         #    new doc counts `written` and the existing ones `docs_deduped`, exactly.
         cfg_exact = EsConfig(hosts=ES_HOSTS, basic_auth=ES_AUTH, verify_certs=False, index=INDEX,

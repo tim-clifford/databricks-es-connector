@@ -6,7 +6,7 @@ action line for each row (an index/upsert "header\\nsource", or a delete "header
 built with `to_json` in the JVM. The executor writer (`bulk.make_ndjson_partition_writer`) then ships
 those lines with `es.bulk(operations=...)` without any Python re-serialization. Building the document
 JSON in Catalyst (multi-core, no GIL) rather than per row in Python is what keeps the transform +
-serialize step -- the throughput ceiling on wide/large writes -- off the GIL.
+serialize step - the throughput ceiling on wide/large writes - off the GIL.
 
 Must run AFTER `sanitize_for_arrow` and `normalize_timestamps_for_utc`: sanitize has already turned
 VARIANT/INTERVAL into JSON strings and normalize has turned every `TimestampType` into an epoch-millis
@@ -31,7 +31,7 @@ round-trips every type through `read_coerce` exactly, with these documented spec
 Everything else (nested structs/arrays/map VALUES, binary as base64, timestamp/date/timestamp_ntz all
 as epoch-millis, kept null fields) round-trips unchanged. The one edge is a map KEY of a non-string
 type (temporal/decimal/binary): to_json stringifies it to its own form (a temporal key -> its ISO
-string, unlike a temporal VALUE -> epoch-millis) -- see the MapType branch of _rewrite_date_ntz. A map
+string, unlike a temporal VALUE -> epoch-millis) - see the MapType branch of _rewrite_date_ntz. A map
 keyed by a raw temporal value is pathological; use string/int map keys.
 
 pyspark is imported lazily inside the function so the pure config/transform layers stay importable
@@ -169,7 +169,7 @@ def _rewrite_date_ntz(col, dt):
     if isinstance(dt, MapType):
         # VALUES only. Map KEYS are deliberately NOT temporally converted: `to_json` stringifies a
         # temporal map key to its ISO form, so a temporal KEY comes out as an ISO string while a
-        # temporal VALUE is epoch-millis -- a documented edge (README). Rewriting keys with
+        # temporal VALUE is epoch-millis - a documented edge (README). Rewriting keys with
         # F.transform_keys was tried and rejected: it RAISES on two sub-millisecond-distinct keys that
         # floor to the same epoch, and still would not cover TimestampType keys (spark_prep leaves map
         # keys untouched), so it cannot make the class consistent anyway. A map keyed by a raw temporal
@@ -260,7 +260,7 @@ def build_ndjson(df, cfg: EsConfig):
     if cfg.id_field:
         # Guard the id column for non-finite SEPARATELY from `payload`: id_field may be in
         # drop_fields (excluded from payload, so the loop above never guards it), and a NaN/±inf id
-        # would otherwise cast to the string "NaN" -- not null -- evading the fail-closed check below
+        # would otherwise cast to the string "NaN" - not null - evading the fail-closed check below
         # and colliding every non-finite id onto one _id. Turning it to null here routes it into that
         # check. Only float/double ids can be non-finite; other id types pass through unchanged.
         # id_col reads the ORIGINAL column (the _source rewrites above are built as separate
@@ -280,7 +280,7 @@ def build_ndjson(df, cfg: EsConfig):
         # Delete-by-id action: id-only, NO source line. has_deletes requires id_field (config guard),
         # so id_col is always set here. A row whose delete_flag_column is true routes to the delete
         # line; every other row indexes. `flag === true` is null-safe: a null flag yields null (not
-        # true), so it falls through to the index line -- a null flag is not a delete.
+        # true), so it falls through to the index line - a null flag is not a delete.
         # delete_flag_column is a real BooleanType (bulk._preflight enforces it), so no string parsing
         # happens here; Catalyst has no way to parse a string flag per row, which is why the boolean
         # type is required at this seam.

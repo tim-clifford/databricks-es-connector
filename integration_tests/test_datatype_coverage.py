@@ -222,7 +222,7 @@ class TestDatatypeCoverage(NotebookTestFixture):
 
     def test_float32_short_repr_roundtrips(self):
         # to_json renders a FLOAT as its SHORT decimal repr (the shortest string that round-trips to
-        # the same float32), so 0.1f stores as 0.1 -- faithful to the literal, unlike the old per-row
+        # the same float32), so 0.1f stores as 0.1 - faithful to the literal, unlike the old per-row
         # path which stored the widened double 0.10000000149011612. Read back into a FLOAT column it
         # returns to the same float32, so float32 no longer has a widening round-trip delta.
         self._assert("s_float32_prec", 0.1)
@@ -309,7 +309,7 @@ class TestDatatypeCoverage(NotebookTestFixture):
 
     def test_decimal_scale2_integer_loses_precision(self):
         # SCALE MATTERS. A decimal WITH SCALE (s>0) is rendered by to_json WITH its trailing
-        # fractional zeros -- 123456789012345678.00 -- i.e. a JSON number carrying a decimal point.
+        # fractional zeros - 123456789012345678.00 - i.e. a JSON number carrying a decimal point.
         # On read that parses to a double and loses digits past ~15-17 sig figs EVEN THOUGH the value
         # is integral, unlike the scale-0 s_decimal_hi above (a bare integer literal, exact). So the
         # contract "integer-valued decimals are exact" holds ONLY at scale 0; this pins the limitation.

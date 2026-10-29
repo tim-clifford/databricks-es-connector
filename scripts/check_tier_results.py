@@ -69,7 +69,7 @@ def newest_results() -> Path:
     """The results.json from the most recent tier run, by directory name (timestamped)."""
     candidates = sorted(RESULTS_DIR.glob("*/results.json"))
     if not candidates:
-        sys.exit(f"no results found under {_display(RESULTS_DIR)}/*/results.json -- "
+        sys.exit(f"no results found under {_display(RESULTS_DIR)}/*/results.json - "
                  "run the integration tier first (RELEASING.md step 2)")
     return candidates[-1]
 
@@ -106,7 +106,7 @@ def _expansion_names(method: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]
     not enough: three of four expansions still de-parametrize to the same single name, so the method
     looks fully covered while one case silently never ran.
 
-    Returns `None` when the names cannot be computed from the source alone -- parameter sets that are
+    Returns `None` when the names cannot be computed from the source alone - parameter sets that are
     not a literal (a name, a comprehension) or that use `pytest.param(...)`. The caller then falls
     back to requiring the bare method name: weaker, but honest, and it never fails a healthy run.
 
@@ -270,7 +270,7 @@ def check(results_path: Path) -> tuple[list[str], list[str], int]:
     for stem, entries in sorted(reported.items()):
         # 1. zero tests, or the single opaque entry dbx_test emits when setup failed
         if not entries:
-            problems.append(f"{stem}: reported ZERO tests -- a skipped fixture is not a pass")
+            problems.append(f"{stem}: reported ZERO tests - a skipped fixture is not a pass")
             continue
         if [e.get("test_name") for e in entries] == ["all_tests"]:
             want = len(expected.get(stem, ()))
@@ -290,7 +290,7 @@ def check(results_path: Path) -> tuple[list[str], list[str], int]:
             # claim. Usually a fixture whose tests were renamed into `test__` helpers, or one that
             # only defines run_setup.
             problems.append(f"integration_tests/{stem}.py declares no discoverable test_* method, "
-                            f"yet the results report {len(entries)} for it -- nothing there can be "
+                            f"yet the results report {len(entries)} for it - nothing there can be "
                             "verified; give it real tests or delete the file")
             continue
 
@@ -326,7 +326,7 @@ def check(results_path: Path) -> tuple[list[str], list[str], int]:
                     # results are not a clean one-per-test record of the run: typically two classes
                     # in one fixture sharing a method name, or results concatenated from two runs.
                     problems.append(
-                        f"{stem}: {method} is credited by more than one result (e.g. {name!r}) -- "
+                        f"{stem}: {method} is credited by more than one result (e.g. {name!r}) - "
                         "the results are not one entry per test, so the reported total overstates "
                         "what ran; re-run the tier against a clean results directory")
                     continue
@@ -354,7 +354,7 @@ def check(results_path: Path) -> tuple[list[str], list[str], int]:
                             f"-- it did not run, was renamed without being wired up, or did not pass")
         # The other direction, which a "does the source set fit inside the reported set" check would
         # miss: a result naming a test the source does not declare. That means the results and the
-        # checkout disagree, so NOTHING here can be trusted to describe this code -- typically a
+        # checkout disagree, so NOTHING here can be trusted to describe this code - typically a
         # stale results.json from before a rename or deletion, or a run against a different revision.
         # Left unchecked it also inflates the reported total, which is the number a human reads.
         for orphan in sorted(covered - expected[stem]):
@@ -367,7 +367,7 @@ def check(results_path: Path) -> tuple[list[str], list[str], int]:
     for stem, want in sorted(expected.items()):
         if want and stem not in reported:
             problems.append(f"{stem}: {len(want)} test(s) in source but the fixture is ABSENT from "
-                            "the results -- it never ran")
+                            "the results - it never ran")
     return problems, warnings, counted
 
 
@@ -384,7 +384,7 @@ def main() -> int:
     for w in warnings:
         print(f"  ! {w}")
     if problems:
-        print(f"\n{len(problems)} problem(s) -- the tier did not run what it claims to cover:")
+        print(f"\n{len(problems)} problem(s) - the tier did not run what it claims to cover:")
         for p in problems:
             print(f"  - {p}")
         print("\nA fixture whose setup fails reports 0 tests, 0 failures, which prints as a PASS. "

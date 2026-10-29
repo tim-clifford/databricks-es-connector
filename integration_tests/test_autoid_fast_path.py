@@ -12,8 +12,8 @@
 # MAGIC    counts them once. This is the documented, accepted at-least-once tradeoff for auto-id, and it is
 # MAGIC    the behavior that DISTINGUISHES the new gate from the old one (the old full path classified
 # MAGIC    per-item without re-shipping, so it would hold the good docs only once). The duplication is
-# MAGIC    SCOPED to a chunk that contains both a success and a failure -- good docs in a clean chunk (a
-# MAGIC    separate partition) are not duplicated -- so the case forces all rows into one chunk via
+# MAGIC    SCOPED to a chunk that contains both a success and a failure - good docs in a clean chunk (a
+# MAGIC    separate partition) are not duplicated - so the case forces all rows into one chunk via
 # MAGIC    `repartition(1)`.
 # MAGIC
 # MAGIC Live ES + the `es_poc` scope required.
@@ -31,7 +31,7 @@ ES_HOSTS = dbutils.secrets.get(SCOPE, "hosts")
 ES_AUTH = (dbutils.secrets.get(SCOPE, "username"), dbutils.secrets.get(SCOPE, "password"))
 
 # Strict mapping: n is an integer, so a row whose n is a non-numeric string is REJECTED by ES
-# (mapper_parsing_exception) -- the deterministic ES-side error the re-ship case needs.
+# (mapper_parsing_exception) - the deterministic ES-side error the re-ship case needs.
 _MAPPING = {"settings": {"index": {"number_of_shards": 1, "number_of_replicas": 0}},
             "mappings": {"properties": {"n": {"type": "integer"}}}}
 
@@ -67,7 +67,7 @@ class TestAutoIdFastPath(NotebookTestFixture):
         _recreate(ERR_INDEX)
         # Two good rows + one ES-rejected row, forced into ONE partition (repartition(1)) so all three
         # land in a SINGLE bulk chunk. This is what makes the good rows share the chunk with the bad row
-        # -- the duplication is scoped to a chunk that contains both a success and a failure; good rows
+        # - the duplication is scoped to a chunk that contains both a success and a failure; good rows
         # in a clean chunk (a separate partition) are NOT duplicated (that is the clean case above). n is
         # a STRING column (both rows cast to string so the UNION's common type is string; otherwise Spark
         # coerces to BIGINT and the bad value fails to cast inside Spark before the connector runs).
@@ -109,7 +109,7 @@ class TestAutoIdFastPath(NotebookTestFixture):
 
     def test_error_autoid_good_docs_duplicated_by_reship(self):
         # The discriminating proof of the new gate: the probe wrote the 2 good docs, then the re-ship
-        # wrote them AGAIN (fresh auto-ids), so ES holds 4 -- twice the good rows -- even though written
+        # wrote them AGAIN (fresh auto-ids), so ES holds 4 - twice the good rows - even though written
         # is 2. The old full path (auto-id) classified per item without re-shipping and would hold 2.
         assert self.err_count == 4, self.err_count
 

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Optional
 
 from .config import EsReadConfig
 from .read_transform import read_coerce, ReadSchemaMismatch
+from .retry import call_with_retries
 
 if TYPE_CHECKING:  # pragma: no cover
     from pyspark.sql import DataFrame, SparkSession
@@ -35,8 +36,8 @@ def _spark_type_token(dtype: "DataType"):
     """Render a pyspark DataType to the token read_transform.read_coerce understands.
 
     A scalar type becomes its lowercase `simpleString()` string ("timestamp", "decimal(10,2)", ...).
-    A container becomes a tuple carrying its already-walked sub-token(s) -- ("array", elem),
-    ("map", key, val), ("struct", [(name, sub), ...]) -- so the coercion layer never re-parses a
+    A container becomes a tuple carrying its already-walked sub-token(s) - ("array", elem),
+    ("map", key, val), ("struct", [(name, sub), ...]) - so the coercion layer never re-parses a
     `struct<...>` DDL string; we hand it the structure the DataType already gives us here.
 
     Containers are recognized structurally (elementType / keyType+valueType / fields) rather than by
@@ -65,7 +66,7 @@ def _reject_non_string_map_keys(field_tokens, _path: str = "") -> None:
     (`to_json`; documented), so a `map` read from `_source` can only ever yield string keys. A
     declared `map<K,V>` with `K` other than `string` therefore cannot be satisfied: mapInPandas would
     fail the Arrow cast to the declared key type (or, on a runtime with an unsafe cast, mis-key
-    SILENTLY). Fail closed here -- once per read on the driver, before any ES round-trip -- naming the
+    SILENTLY). Fail closed here - once per read on the driver, before any ES round-trip - naming the
     fix, rather than letting an opaque per-partition cast error (or silent corruption) surface later.
     Recurses the token tree so a map nested inside a struct/array/map value is caught too. `map`
     VALUES are unaffected (they carry their own value transform); only the KEY type is constrained.
@@ -120,8 +121,12 @@ def _coerce_hit(source: dict, doc_id, field_tokens, id_field: Optional[str], inc
     return row
 
 
-def _slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None):
+def _slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None, *, retry_cfg):
     """Yield raw hits over an ALREADY-OPEN PIT, optionally restricted to one slice.
+
+    Each page request goes through retry.call_with_retries under `retry_cfg` (the read config), so a
+    failed page is retried with backoff; re-requesting a page is idempotent (same PIT, same
+    search_after). `retry_cfg` is required so no call site can silently skip retries.
 
     Pages with `search_after` (no from/size deep-pagination limit). `slice_spec`, when given, is
     `{"id": i, "max": n}`, an ES sliced scroll, so N parallel readers each pull a disjoint 1/N of
@@ -143,7 +148,7 @@ def _slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None):
             kwargs["slice"] = slice_spec
         if search_after is not None:
             kwargs["search_after"] = search_after
-        resp = es.search(**kwargs)
+        resp = call_with_retries(lambda: es.search(**kwargs), retry_cfg)
         hits = resp["hits"]["hits"]
         if not hits:
             break
@@ -154,7 +159,7 @@ def _slice_hits(es, pit_id, query, batch_size, keep_alive, slice_spec=None):
 
 
 def _resolve_num_slices(es, index: str, configured: Optional[int],
-                        strict: bool = True) -> int:
+                        strict: bool = True, *, retry_cfg) -> int:
     """How many slices to fan out into: the caller's `num_slices`, else the index's shard count.
 
     Sliced scroll partitions best at (a multiple of) the shard count; defaulting to it gives one
@@ -171,7 +176,9 @@ def _resolve_num_slices(es, index: str, configured: Optional[int],
     if configured is not None:
         return max(1, int(configured))
     try:
-        settings = es.indices.get_settings(index=index, flat_settings=True)
+        # Retried with backoff (retry_cfg) BEFORE the strict/fallback handling below sees a failure.
+        settings = call_with_retries(
+            lambda: es.indices.get_settings(index=index, flat_settings=True), retry_cfg)
         # {index_name: {"settings": {"index.number_of_shards": "N"}}}
         one = next(iter(settings.values()))
         shards = int(one["settings"]["index.number_of_shards"])
@@ -225,6 +232,7 @@ def _make_slice_reader(cfg: EsReadConfig, pit_id: str, query: dict, field_tokens
                     _coerce_hit(h.get("_source", {}), h.get("_id"),
                                 field_tokens, cfg.id_field, cfg.include_id)
                     for h in _slice_hits(es, pit_id, query, cfg.batch_size, cfg.pit_keep_alive,
+                                         retry_cfg=cfg,
                                          slice_spec=slice_spec)
                 ]
                 if rows:
@@ -269,8 +277,10 @@ def read_index(spark: "SparkSession", cfg: EsReadConfig, schema: "StructType") -
     es = Elasticsearch(**cfg.client_kwargs())
     try:
         num_slices = _resolve_num_slices(es, cfg.index, cfg.num_slices,
-                                         strict=cfg.strict_slices)
-        pit_id = es.open_point_in_time(index=cfg.index, keep_alive=cfg.pit_keep_alive)["id"]
+                                         strict=cfg.strict_slices, retry_cfg=cfg)
+        # A lost response here at worst leaves an orphan PIT, which expires on its own keep_alive.
+        pit_id = call_with_retries(
+            lambda: es.open_point_in_time(index=cfg.index, keep_alive=cfg.pit_keep_alive), cfg)["id"]
     finally:
         # The driver client's only jobs are resolving the slice count and opening the PIT; each
         # executor builds its own client. Close this one now (best-effort) so it doesn't leak, but

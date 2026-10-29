@@ -68,6 +68,13 @@ reads), and coerces each `_source` value back to the caller's **declared Spark t
 The read schema is required, there is no mapping inference (several write transforms are one-way and
 can't be inverted from the stored value alone).
 
+**Retries** (`retry.py`): the connector owns every retry. `EsConnection.client_kwargs()` builds each
+client with `max_retries=0`, and every ES call (`es.bulk`, the `indices.exists` preflight,
+`indices.get_settings`, `open_point_in_time`, the per-page `es.search`) goes through
+`call_with_retries`, which retries an allow-list (timeout, connection error, a status in
+`request_retry_status_list`) with exponential backoff. A new ES call site must go through it too, or
+it silently gets no retries. The per-document 429 loop in `_ship_ndjson_chunk` shares `backoff_seconds`.
+
 **Serverless / Spark Connect constraints** (these shape the whole design, do not "simplify" them
 away): no RDD APIs (`mapInPandas` only); `df.schema` / `df.dtypes` / `df.columns` all throw on a
 VARIANT column (use `DESCRIBE`); executors build their own ES client from a frozen config (nothing
@@ -79,7 +86,7 @@ non-serializable crosses the wire).
 documented one-way deltas: **decimal** precision beyond ~15-17 sig figs on read (exact only at scale 0,
 where `to_json` writes a bare integer literal; a `decimal(p,s)` with `s>0` writes a decimal point and
 parses to a double on read, losing low digits even for an integral value) and **sub-millisecond
-timestamp** floor. Everything else round-trips exactly -- including
+timestamp** floor. Everything else round-trips exactly - including
 `float` (32-bit), which `to_json` renders as its short decimal repr and reads back into a `FLOAT`
 unchanged (0.9.0 dropped the old float32-widening delta, three -> two). See
 [references/1-fidelity-model.md](references/1-fidelity-model.md) for the full per-type table (stored
@@ -95,7 +102,7 @@ silently breaks. This is the connector's single most error-prone surface:
    Catalyst with `to_json`.
 2. `read_transform.py::read_coerce`: the exact read inverse for the declared type.
 3. `tests/test_read_transform.py`: the read inverse against the stored form (`read_coerce(<stored>,
-   "type") == x`) -- the fast offline half of the oracle.
+   "type") == x`) - the fast offline half of the oracle.
 4. An `integration_tests/` fixture: the write<->read round-trip proven live against real Spark + ES
    (the whole oracle, since `to_json` only runs in Spark).
 5. The README "Datatype coverage" + "Read fidelity" tables: the documented contract.
