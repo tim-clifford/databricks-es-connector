@@ -1,8 +1,8 @@
 # databricks-es-connector
 
-**Using the connector?** Read `README.md`. Install the wheel and call `bulk_write` (batch) or
-`make_foreach_batch` (Structured Streaming) to write, `read_index` to read; the README covers the
-API, configuration, datatype fidelity, and the gotchas a caller hits. Nothing below this line is
+**Using the connector?** Read `README.md` and the `docs/` it links to. Install the wheel and call
+`bulk_write` (batch) or `make_foreach_batch` (Structured Streaming) to write, `read_index` to read;
+the docs cover the API, configuration, datatype fidelity, and the gotchas a caller hits. Nothing below this line is
 needed to *use* the library. (The wheel ships only the `databricks_es_connector`
 package: this file and the skill are repo-maintenance material, not part of what a consumer installs.)
 
@@ -14,8 +14,8 @@ It is the maintenance skill for this library and it is NOT auto-discovered (it l
 repo's correctness depends on and that are easy to violate without knowing them:
 
 - **The five-places rule.** Changing how a Spark datatype is handled requires five files to move
-  together (write transform, read inverse, round-trip oracle, integration fixture, README tables) or
-  fidelity silently breaks. `references/2-datatype-contract.md`.
+  together (write transform, read inverse, round-trip oracle, integration fixture,
+  `docs/datatypes.md` tables) or fidelity silently breaks. `references/2-datatype-contract.md`.
 - **The fidelity contract.** `build_ndjson` (`to_json`, the write serializer) and `read_coerce` must
   stay exact inverses except for two documented one-way deltas. `references/1-fidelity-model.md`.
 - **Docs describe the current state, never the history.** No "as of 0.6.0 we...", no before/after

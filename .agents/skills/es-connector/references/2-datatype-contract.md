@@ -17,7 +17,7 @@ breaks. This checklist is the connector's most important review gate.
 2. **`src/databricks_es_connector/read_transform.py` -> `read_coerce`**
    The EXACT inverse for the declared type token (`"timestamp"`, `"decimal(10,2)"`, `"struct<...>"`,
    etc.). If the write side is genuinely one-way (e.g. variant->string), the inverse is a documented
-   passthrough, say so in a comment and in the README.
+   passthrough, say so in a comment and in `docs/datatypes.md`.
 
 3. **`tests/test_read_transform.py`** (the read half) **AND an `integration_tests/` fixture** (the
    write<->read whole). `build_ndjson` only runs in Spark, so the round-trip oracle lives in the
@@ -31,7 +31,7 @@ breaks. This checklist is the connector's most important review gate.
    Usually `test_datatype_coverage.py` (the wide one-row-per-type matrix) and/or
    `test_read_roundtrip.py`. For timestamps, also `test_timezone_utc.py` under a non-UTC session.
 
-5. **README "Datatype coverage" + "Read fidelity" tables** (and `.agents/skills/es-connector/references/1-fidelity-model.md`)
+5. **`docs/datatypes.md` write + read tables** (and `.agents/skills/es-connector/references/1-fidelity-model.md`)
    The documented contract customers read. Update the write table, the read-inverse table, and the
    one-way-delta list if the delta set changed. Keep ref 1 in this skill in sync.
 
@@ -63,7 +63,7 @@ instead of a datetime. The complete fix touched:
    `tzinfo is None` AND `isinstance datetime`, i.e. not the raw int), proven red before the fix.
 3. `integration_tests/test_read_roundtrip.py`: an `s_ts_ntz` column read back naive against live ES;
    `test_datatype_coverage.py` / `test_timezone_utc.py` assert NTZ is unaffected by the session zone.
-4. README: `timestamp_ntz` rows added to both the write and read-inverse tables.
+4. `docs/datatypes.md`: `timestamp_ntz` rows added to both the write and read-inverse tables.
 (the write side needed no change here, it was already correct, which is itself the tell: always
 check whether the gap is on the write side (`build_ndjson`), the read side (`read_coerce`), or both.)
 
@@ -72,7 +72,7 @@ check whether the gap is on the write side (`build_ndjson`), the read side (`rea
 - [ ] `build_ndjson` (`to_json`) and `read_coerce` are still exact inverses (or the delta is newly documented).
 - [ ] A `tests/test_read_transform.py` case covers the read inverse against the stored form, shown to FAIL without the change.
 - [ ] An integration fixture covers the write<->read round-trip live (and under a non-UTC session if it's a timestamp).
-- [ ] README write + read tables and ref 1 updated; one-way-delta list correct.
+- [ ] `docs/datatypes.md` write + read tables and ref 1 updated; one-way-delta list correct.
 - [ ] If Arrow-hostile/timestamp: `spark_prep.py` handles it, with `tests/test_spark_prep.py` cases.
 - [ ] `scripts/check_readme_sync.py` passes (new fixture/module documented).
 - [ ] `scripts/check_version_consistency.py` passes (only relevant if the change ships with a
