@@ -118,7 +118,7 @@ Hardening still needed before production for SIEM/audit data:
   rows the caller flags: it does **not** dedup or
   order Change Data Feed rows itself. That is deliberate: dedup needs the caller's business
   sequencing column and should run distributed in Spark, not in executor memory (see the
-  Change-Data-Feed pattern in the README). **Known limitation:** a caller that dedups per
+  Change-Data-Feed pattern in [Deletes](writing.md#deletes)). **Known limitation:** a caller that dedups per
   micro-batch is only correct within a batch: late-arriving data whose `event_ts` is older than a
   doc already in ES, but committed in a *later* batch, can clobber the newer doc. The memory-free
   fix (not yet implemented) is ES external versioning (`version` = `event_ts` epoch-millis,
@@ -159,8 +159,8 @@ Hardening still needed before production for SIEM/audit data:
 ## Open items: packaging & portability
 
 - **Wheel install path is per-environment.** Notebooks `%pip install` from a specific UC Volume
-  path; `%pip` cannot read a widget, so this line is edited per workspace. Documented in the
-  README ("Deploying to a workspace").
+  path; `%pip` cannot read a widget, so this line is edited per workspace. Documented in
+  [Deploying to a workspace](setup.md#deploying-to-a-workspace).
 - **Datatype coverage is complete, with a few fidelity caveats.** Every Spark column is exportable
   with no caller pre-processing. The whole `_bulk` line is built in Spark with `to_json`
   (`spark_serialize.build_ndjson`): numerics as JSON numbers, `decimal` at full precision,

@@ -39,7 +39,7 @@ Each fixture owns one concern:
   array/empty-array/array-of-struct/null-element, non-finite floats, VARIANT at every depth,
   INTERVAL), plus an all-NULL row proving the null contract (field present as JSON null, not
   absent), plus a reverse check that the connector adds no unexpected fields. Asserts each value
-  against the README "Datatype coverage" contract. Throwaway index, dropped per run.
+  against the [Datatype Fidelity](datatypes.md) contract. Throwaway index, dropped per run.
 - **`test_bulk_write_roundtrip.py`**: live ES. Owns the **write-result contract**: `bulk_write`
   returns `written`/`deleted`/`errors`/`total_input`/`error_samples` correctly, including a
   deliberately-rejected doc (so the error path + `error_samples` are exercised, not just the clean
@@ -97,7 +97,7 @@ Each fixture owns one concern:
   VARIANT→JSON-string at any depth, scalar INTERVAL→Spark string form, plain columns untouched,
   idempotency, Arrow-collectability, and the `df.schema`-throws-on-Connect constraint.
 - **`test_dynamic_mapping_coercion.py`**: live ES. Owns the **dynamic-mapping boundary** documented
-  in the connector README's "Dynamic-mapping gotcha" note: with NO pre-created index mapping, ES
+  in the "Dynamic-mapping gotcha" note in [Mapping gotchas](reading.md#mapping-gotchas): with NO pre-created index mapping, ES
   infers a field's type from the first doc and coerces later docs for INDEXING while keeping
   `_source` verbatim. Proves BOTH halves: the connector round-trip (`read_index`, reads `_source`)
   returns the original value (a `float` into an int-mapped field; a >256-char string past keyword
@@ -144,7 +144,7 @@ runs each fixture as a notebook, and reports console + JUnit + JSON results (JUn
   `total=0, failed=0` from that, which every downstream reader treats as success (one `all_tests`
   entry, `Failed: 0`, `All tests passed`). So a fixture that never ran a single assertion is
   indistinguishable from a clean one in the headline numbers. `scripts/check_tier_results.py` is the
-  gate for this and runs as part of RELEASING.md step 2: it requires every `test_*` method in a
+  gate for this and runs as part of [Releasing](releasing.md) step 2: it requires every `test_*` method in a
   fixture's source to appear by name in that fixture's results. Do not accept a tier result without
   it. A `@pytest.mark.skip` counts as missing, because a reported-but-skipped test keeps the numbers
   matching while asserting nothing; parametrized expansions (`test_thing[1]`, ...) are matched back
