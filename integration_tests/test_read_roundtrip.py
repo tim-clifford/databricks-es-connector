@@ -4,7 +4,7 @@
 # MAGIC The payoff test for the read path: take a Spark DataFrame, write it to ES with `bulk_write`,
 # MAGIC read it back with `read_index` using the **same schema**, and assert the round-tripped rows
 # MAGIC equal the originals, **except** the deltas docs/datatypes.md documents as one-way (decimal
-# MAGIC precision, sub-millisecond timestamp, float32 widening). This proves the read coercion layer
+# MAGIC precision, sub-millisecond timestamp). This proves the read coercion layer
 # MAGIC (`read_coerce`) is the true inverse of the write path (build_ndjson / to_json) against real
 # MAGIC Elasticsearch. With the pure-Python write transform gone, this live round-trip - not an
 # MAGIC offline oracle - is where write↔read fidelity is proven end to end.

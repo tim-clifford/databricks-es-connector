@@ -3,7 +3,7 @@
 read_coerce turns an ES `_source` value back into the value Spark expects for the declared type. Each
 test feeds it the STORED form a document actually holds (epoch-millis for temporal, base64 for binary,
 a float for decimal, a JSON string for variant) and asserts the reconstructed Python value, including
-the deltas docs/datatypes.md documents as one-way (decimal precision, sub-ms timestamp, float32 widening).
+the deltas docs/datatypes.md documents as one-way (decimal precision, sub-ms timestamp).
 
 The stored epoch-millis are computed here from a datetime the independent way (int(ts.timestamp()*
 1000)), NOT via the connector's write code, so this file tests the read inverse on its own. The full
