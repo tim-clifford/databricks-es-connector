@@ -61,7 +61,7 @@ dbx_test run \
 is a useful second live check on a release candidate, but it is not part of this repo's gate: the
 integration tier above is what has to be green.
 
-## The release gates (`scripts/`, all hard gates in docs/releasing.md step 3)
+## The release gates (`scripts/`, all hard gates: `check_tier_results.py` in docs/releasing.md step 2, the rest in step 3)
 
 - **`scripts/check_requirements_match.py`**, resolves the built wheel's dependency closure in a
   throwaway venv and compares it name+version exact against `requirements.txt` (which pyproject's
