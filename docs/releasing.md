@@ -107,7 +107,7 @@ was no defence. **A non-zero exit blocks the release even when the tier says eve
 
 ### 3. Run the release gates (HARD GATES)
 
-Two scripts, both must exit `0`. Run them with the **same Python minor version** used to regenerate
+Three scripts, all must exit `0`. Run them with the **same Python minor version** used to regenerate
 `requirements.txt` in step 1 (see the caveat there).
 
 **3a. `requirements.txt` exactly matches the wheel's closure:**
@@ -140,7 +140,7 @@ diff-scoped code review structurally can't (a file added without updating the RE
 On a non-zero exit, add the missing file(s) to the named doc(s) with a one-line description and
 re-run.
 
-**A non-zero exit from either gate blocks the release.**
+**A non-zero exit from any gate blocks the release.**
 
 ### 4. Tag and attach the wheel to the release
 
