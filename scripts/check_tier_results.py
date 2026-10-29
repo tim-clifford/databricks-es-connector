@@ -70,7 +70,7 @@ def newest_results() -> Path:
     candidates = sorted(RESULTS_DIR.glob("*/results.json"))
     if not candidates:
         sys.exit(f"no results found under {_display(RESULTS_DIR)}/*/results.json - "
-                 "run the integration tier first (RELEASING.md step 2)")
+                 "run the integration tier first (docs/releasing.md step 2)")
     return candidates[-1]
 
 

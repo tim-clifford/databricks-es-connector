@@ -36,12 +36,12 @@ def _skip_dunder(path: str) -> bool:
 RULES = [
     ("library modules -> README.md",
      "src/databricks_es_connector/*.py", ["README.md"], _skip_dunder),
-    ("integration fixtures -> integration_tests/README.md",
-     "integration_tests/test_*.py", ["integration_tests/README.md"], None),
+    ("integration fixtures -> docs/integration-tests.md",
+     "integration_tests/test_*.py", ["docs/integration-tests.md"], None),
     ("integration fixtures -> README.md repo-layout",
      "integration_tests/test_*.py", ["README.md"], None),
-    ("release scripts -> RELEASING.md or README.md",
-     "scripts/*.py", ["RELEASING.md", "README.md"], _skip_dunder),
+    ("release scripts -> docs/releasing.md or README.md",
+     "scripts/*.py", ["docs/releasing.md", "README.md"], _skip_dunder),
 ]
 
 

@@ -15,7 +15,7 @@ doc-review checklist (version consistency), now enforced.
 
 Checks, all against `pyproject.toml [project].version` as the single source of truth:
   1. `src/databricks_es_connector/__init__.py` `__version__`
-  2. `HANDOFF.md`'s header version (it is deliberately pinned to a release)
+  2. `docs/production-readiness.md`'s header version (it is deliberately pinned to a release)
   3. every `databricks_es_connector-<version>-py3-none-any.whl` reference in tracked text files
 
 Exits non-zero and names every mismatch. Run from the repo root.
@@ -30,8 +30,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Files whose wheel references must match. Globs, relative to the repo root. Deliberately does NOT
 # include dist/ (built artifacts legitimately accumulate old versions).
-WHEEL_REF_GLOBS = ("README.md", "RELEASING.md", "HANDOFF.md", "integration_tests/**/*.yml",
+WHEEL_REF_GLOBS = ("README.md", "docs/**/*.md", "integration_tests/**/*.yml",
                    "integration_tests/**/*.md", "integration_tests/**/*.py", ".agents/**/*.md")
+
+# The production-readiness doc, whose header is pinned to a release.
+READINESS_DOC = "docs/production-readiness.md"
 
 _WHEEL_RE = re.compile(r"databricks_es_connector-(\d+\.\d+\.\d+)-py3-none-any\.whl")
 
@@ -56,13 +59,13 @@ def check(want: str) -> list[str]:
         problems.append(f"src/databricks_es_connector/__init__.py: __version__ = {m.group(1)!r}, "
                         f"expected {want!r}")
 
-    # 2. HANDOFF.md header (pinned to a release on purpose)
-    handoff = (ROOT / "HANDOFF.md").read_text().splitlines()[0]
+    # 2. docs/production-readiness.md header (pinned to a release on purpose)
+    handoff = (ROOT / READINESS_DOC).read_text().splitlines()[0]
     found = re.findall(r"(\d+\.\d+\.\d+)", handoff)
     if not found:
-        problems.append(f"HANDOFF.md: header names no version ({handoff!r})")
+        problems.append(f"{READINESS_DOC}: header names no version ({handoff!r})")
     elif want not in found:
-        problems.append(f"HANDOFF.md: header says {found}, expected {want!r} - {handoff!r}")
+        problems.append(f"{READINESS_DOC}: header says {found}, expected {want!r} - {handoff!r}")
 
     # 3. every wheel filename reference
     seen_any = False
@@ -95,7 +98,7 @@ def main() -> int:
             print(f"  - {p}")
         print("\nFix each, or bump pyproject.toml if the version itself is what changed.")
         return 1
-    print("OK: __init__, HANDOFF header, and every wheel reference agree.")
+    print("OK: __init__, production-readiness header, and every wheel reference agree.")
     return 0
 
 
