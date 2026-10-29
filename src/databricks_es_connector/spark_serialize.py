@@ -16,7 +16,7 @@ touched by `normalize_timestamps_for_utc`, so `build_ndjson` converts them itsel
 epoch-millis long (see `_rewrite_date_ntz`), or `to_json` would emit ISO strings and break the
 read_coerce round-trip.
 
-Fidelity contract (documented in the README datatype tables; rendering verified live). `to_json`
+Fidelity contract (documented in the docs/datatypes.md tables; rendering verified live). `to_json`
 round-trips every type through `read_coerce` exactly, with these documented specifics:
   - Non-finite floats: `to_json` renders NaN/inf as the quoted STRINGS "NaN"/"Infinity"/"-Infinity",
     which a numeric ES field rejects. So this builder replaces them with null at ANY nesting depth
@@ -169,7 +169,7 @@ def _rewrite_date_ntz(col, dt):
     if isinstance(dt, MapType):
         # VALUES only. Map KEYS are deliberately NOT temporally converted: `to_json` stringifies a
         # temporal map key to its ISO form, so a temporal KEY comes out as an ISO string while a
-        # temporal VALUE is epoch-millis - a documented edge (README). Rewriting keys with
+        # temporal VALUE is epoch-millis - a documented edge (docs/datatypes.md). Rewriting keys with
         # F.transform_keys was tried and rejected: it RAISES on two sub-millisecond-distinct keys that
         # floor to the same epoch, and still would not cover TimestampType keys (spark_prep leaves map
         # keys untouched), so it cannot make the class consistent anyway. A map keyed by a raw temporal
@@ -204,7 +204,7 @@ def _null_nonfinite(col, dt):
     if isinstance(dt, MapType):
         # Values only: a map KEY cannot be nulled (a null map key is invalid / collapses the entry),
         # so a non-finite float KEY is left as-is and to_json renders it as the string "NaN"/"Infinity".
-        # This is a documented limitation (README): a map keyed by a raw float is pathological anyway;
+        # This is a documented limitation (docs/datatypes.md): a map keyed by a raw float is pathological anyway;
         # use string/int keys. Finite float keys are unaffected.
         return F.transform_values(col, lambda k, v: _null_nonfinite(v, dt.valueType))
     return col

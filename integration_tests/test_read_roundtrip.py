@@ -3,7 +3,7 @@
 # MAGIC # Integration: write → read round-trip (bulk_write then read_index) live on Spark + ES
 # MAGIC The payoff test for the read path: take a Spark DataFrame, write it to ES with `bulk_write`,
 # MAGIC read it back with `read_index` using the **same schema**, and assert the round-tripped rows
-# MAGIC equal the originals, **except** the deltas the README documents as one-way (decimal
+# MAGIC equal the originals, **except** the deltas docs/datatypes.md documents as one-way (decimal
 # MAGIC precision, sub-millisecond timestamp, float32 widening). This proves the read coercion layer
 # MAGIC (`read_coerce`) is the true inverse of the write path (build_ndjson / to_json) against real
 # MAGIC Elasticsearch. With the pure-Python write transform gone, this live round-trip - not an
@@ -204,7 +204,7 @@ class TestReadRoundtrip(NotebookTestFixture):
         # DOCUMENTED workaround: casting a high-precision decimal to STRING in Spark before writing
         # preserves exactness past double's ~15-17 sig figs. Read back as StringType, the 18-digit
         # value must be exact - unlike s_decimal_hi in test_datatype_coverage, which loses low digits
-        # because it goes through float. This proves the mitigation the README recommends.
+        # because it goes through float. This proves the mitigation docs/datatypes.md recommends.
         assert self.out_rows["r1"]["s_decimal_exact_str"] == "123456789012345678"
         assert self.out_rows["r2"]["s_decimal_exact_str"] == "-98765432109876543"
 

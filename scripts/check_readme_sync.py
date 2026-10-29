@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Verify the docs enumerate the code: every shipped module / test fixture / release script is
-mentioned by name in the README that is supposed to list it.
+mentioned by name in the doc that is supposed to list it.
 
 Why this exists: a diff-scoped code review can't catch "a file was added but the doc that lists it
 wasn't updated" (the doc lines that should have changed simply don't appear in the diff). This is a

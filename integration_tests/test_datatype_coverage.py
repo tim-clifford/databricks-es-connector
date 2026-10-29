@@ -4,7 +4,7 @@
 # MAGIC The exhaustive datatype-fidelity test. Builds one wide row exercising **every** Spark type and
 # MAGIC the edge cases a symmetric round-trip can hide, plus an all-NULL row of the same schema, writes
 # MAGIC both through the connector to a live ES index, reads them back, and asserts each value equals
-# MAGIC the connector's **documented** transform (see the connector README "Datatype coverage" table).
+# MAGIC the connector's **documented** transform (see the write table in docs/datatypes.md).
 # MAGIC
 # MAGIC Formalizes the `datatype_coverage` demo as a permanent connector test. Companion:
 # MAGIC `test_bulk_write_roundtrip.py` owns the write-result contract (total_input / error_samples);
@@ -341,7 +341,7 @@ class TestDatatypeCoverage(NotebookTestFixture):
 
     def test_intervals_as_string(self):
         # Assert the KNOWN canonical literal (not a value derived from Spark's own cast, which would
-        # be tautological). Matches the connector README's documented interval example.
+        # be tautological). Matches the interval example documented in docs/datatypes.md.
         self._assert("s_interval_dt", "INTERVAL '1 02:03:04' DAY TO SECOND")
         self._assert("s_interval_ym", "INTERVAL '2-3' YEAR TO MONTH")
 
