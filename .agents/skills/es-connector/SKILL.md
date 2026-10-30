@@ -4,14 +4,14 @@ description: >
   Maintain, review, refactor, and release the databricks-es-connector library (this repo), a
   serverless-safe, bidirectional Spark<->Elasticsearch connector. This is a MAINTAINER skill for
   working ON the connector's own source, not a how-to-call-it guide (a consumer installs the wheel
-  and follows README.md; do not load this merely to invoke bulk_write / read_index in an
+  and follows README.md and docs/; do not load this merely to invoke bulk_write / read_index in an
   application). Use when modifying any file under src/databricks_es_connector/, adding or altering a
   Spark datatype's write transform or read inverse, touching the write path (sanitize_for_arrow /
   timestamp normalization / build_ndjson / bulk) or the read path (read_index / read_coerce) as
   CODE, debugging a data-fidelity or round-trip regression in the transforms, reasoning about the
   Elasticsearch behavior the connector depends on (dynamic mapping, term/keyword, timezone,
   coercion, _source-vs-indexed), running the integration tier on FEVM serverless, reviewing this
-  repo's documentation for drift (README, HANDOFF, RELEASING, the skill itself), or cutting a
+  repo's documentation for drift (README.md, docs/, the skill itself), or cutting a
   release. In short: load it to CHANGE the connector or reason about its internals, not just to
   call it.
 ---
@@ -22,7 +22,7 @@ This is a **stable maintenance-and-review** skill, not an authoring one. The con
 (~1,300-line) library; the recurring work is *changing it safely and proving fidelity*, not writing
 new code from a template. The single most important property to protect is **round-trip data
 fidelity**: a value written from Spark to ES and read back must be unchanged, except for the deltas
-the README explicitly documents as one-way.
+`docs/datatypes.md` explicitly documents as one-way.
 
 ## Architecture in one screen
 
@@ -105,7 +105,7 @@ silently breaks. This is the connector's single most error-prone surface:
    "type") == x`) - the fast offline half of the oracle.
 4. An `integration_tests/` fixture: the write<->read round-trip proven live against real Spark + ES
    (the whole oracle, since `to_json` only runs in Spark).
-5. The README "Datatype coverage" + "Read fidelity" tables: the documented contract.
+5. The write and read tables in `docs/datatypes.md`: the documented contract.
 
 `spark_prep.py` (VARIANT/INTERVAL, timestamp normalization) is a sixth place when the type is
 Arrow-hostile or a timestamp. See [references/2-datatype-contract.md](references/2-datatype-contract.md)
@@ -123,14 +123,15 @@ These are the recurring customer/reviewer questions. See
 Two tiers: `tests/` (pure-Python, `pytest`, the fast gate, the transform core is 100% line-covered)
 and `integration_tests/` (live Spark + ES on FEVM serverless via `dbx_test`, the release gate). The
 Spark-side code in `spark_prep.py` can only be proven in the integration tier. Releases follow
-`RELEASING.md` with three hard gate scripts (`scripts/check_requirements_match.py`,
-`scripts/check_readme_sync.py`, `scripts/check_version_consistency.py`). See
+`docs/releasing.md` with four hard gate scripts (`scripts/check_tier_results.py`,
+`scripts/check_requirements_match.py`, `scripts/check_readme_sync.py`,
+`scripts/check_version_consistency.py`). See
 [references/4-release-and-tests.md](references/4-release-and-tests.md) for how to run each and the
 exact FEVM commands.
 
 ## Documentation review (pre-change and at review time)
 
-The prose docs (README, `integration_tests/README.md`, `RELEASING.md`, `HANDOFF.md`, and THIS skill)
+The prose docs (`README.md`, everything in `docs/`, and THIS skill)
 are not executable, so nothing fails when they drift. Two classes are scripted
 (`check_readme_sync.py` for missing file listings, `check_version_consistency.py` for stale
 versions/wheel pins); stale descriptions and out-of-date claims are not. Run the holistic doc-review
@@ -147,7 +148,7 @@ is the doc most prone to silent drift (it restates the others), so it is explici
 | Debug a round-trip / fidelity question | ref 1 (then reproduce with a `tests/test_read_transform.py` oracle case) |
 | Answer an ES-behavior question (timezone, term, coercion) | ref 3 |
 | Touch the Spark-side write prep (`spark_prep.py`) | refs 1, 4 (only the integration tier can prove it) |
-| Run the integration tier on FEVM / cut a release | ref 4 + `RELEASING.md` |
+| Run the integration tier on FEVM / cut a release | ref 4 + `docs/releasing.md` |
 | Review a PR touching transforms | refs 1, 2 (verify the five-places rule held) |
 | Start a work session / review any behavior or file-set change | ref 5 (holistic doc-review checklist) |
 
@@ -155,7 +156,7 @@ is the doc most prone to silent drift (it restates the others), so it is explici
 
 - **Never let `build_ndjson` (`to_json`) and `read_coerce` drift apart.** A change to the write side
   needs the inverse in `read_coerce`, or a *deliberate, documented* reason (a one-way delta added to
-  the README). The read inverse has a fast offline test (`tests/test_read_transform.py`, red-before-
+  `docs/datatypes.md`). The read inverse has a fast offline test (`tests/test_read_transform.py`, red-before-
   green against the stored form); the write<->read round-trip is proven live in the integration tier,
   since `to_json` only runs in Spark.
 - **`df.schema` is forbidden on a possibly-VARIANT DataFrame** (Spark Connect throws). Use the
@@ -170,10 +171,11 @@ is the doc most prone to silent drift (it restates the others), so it is explici
   plausible-looking test for multiple sessions; the fix was only found by running real code on
   serverless under a non-UTC session. For any ES-behavior claim, check Elastic's docs or probe a
   live index. Distinguish proven-live from tested-offline from designed.
-- **Docs are part of the change.** Adding a module/fixture/script means updating the README(s);
+- **Docs are part of the change.** Adding a module/fixture/script means updating the doc that
+  lists it (the README layout, `docs/integration-tests.md`, `docs/releasing.md`);
   `scripts/check_readme_sync.py` gates it, but write the entry as you go.
 - **Review the docs holistically before changing the repo and at review time.** Run
   [references/5-doc-review.md](references/5-doc-review.md): version consistency, public API, datatype
-  tables, release process, HANDOFF status, and this skill vs. the code. Fix drift in the same PR that
+  tables, release process, production-readiness status, and this skill vs. the code. Fix drift in the same PR that
   caused it, never in a deferred "docs catch-up" pass. This is the only backstop that keeps the prose
   docs and the skill itself honest, since they have no failing test.

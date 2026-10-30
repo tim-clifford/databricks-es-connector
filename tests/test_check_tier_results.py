@@ -421,7 +421,7 @@ def test_newest_results_picks_the_latest_timestamped_run(tmp_path, monkeypatch):
 
 
 def test_newest_results_exits_when_there_are_none(tmp_path, monkeypatch):
-    """No results at all must be a clean exit with a pointer to RELEASING.md, not a traceback."""
+    """No results at all must be a clean exit with a pointer to docs/releasing.md, not a traceback."""
     monkeypatch.setattr(gate, "RESULTS_DIR", tmp_path / "nothing")
     with pytest.raises(SystemExit) as exc:
         gate.newest_results()

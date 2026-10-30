@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Integration: ES dynamic-mapping coercion vs the connector round-trip
-# MAGIC Proves the claim in the README's "Dynamic-mapping gotcha" note: when no index mapping is
+# MAGIC Proves the claim in the "Dynamic-mapping gotcha" note in docs/reading.md: when no index mapping is
 # MAGIC pre-created, ES infers each field's type from the FIRST document and coerces later docs to fit
 # MAGIC it for **indexing**, but keeps the original value in `_source`. The consequence:
 # MAGIC
@@ -36,7 +36,7 @@ LONG_STR = "x" * 300                                  # exceeds keyword ignore_a
 class TestDynamicMappingCoercion(NotebookTestFixture):
     """No pre-created mapping: ES dynamic-maps from the first doc and coerces later docs for INDEXING,
     but _source stays verbatim. The connector (reads _source) round-trips faithfully; a direct ES
-    query (reads the indexed value) sees the coercion. Proves both halves of the README note."""
+    query (reads the indexed value) sees the coercion. Proves both halves of that docs/reading.md note."""
 
     def _recreate(self, index):
         # Delete then let the FIRST written doc trigger ES dynamic mapping (no explicit mapping body).

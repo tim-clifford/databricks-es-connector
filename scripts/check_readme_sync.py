@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Verify the docs enumerate the code: every shipped module / test fixture / release script is
-mentioned by name in the README that is supposed to list it.
+mentioned by name in the doc that is supposed to list it.
 
 Why this exists: a diff-scoped code review can't catch "a file was added but the doc that lists it
 wasn't updated" (the doc lines that should have changed simply don't appear in the diff). This is a
@@ -36,12 +36,12 @@ def _skip_dunder(path: str) -> bool:
 RULES = [
     ("library modules -> README.md",
      "src/databricks_es_connector/*.py", ["README.md"], _skip_dunder),
-    ("integration fixtures -> integration_tests/README.md",
-     "integration_tests/test_*.py", ["integration_tests/README.md"], None),
+    ("integration fixtures -> docs/integration-tests.md",
+     "integration_tests/test_*.py", ["docs/integration-tests.md"], None),
     ("integration fixtures -> README.md repo-layout",
      "integration_tests/test_*.py", ["README.md"], None),
-    ("release scripts -> RELEASING.md or README.md",
-     "scripts/*.py", ["RELEASING.md", "README.md"], _skip_dunder),
+    ("release scripts -> docs/releasing.md or README.md",
+     "scripts/*.py", ["docs/releasing.md", "README.md"], _skip_dunder),
 ]
 
 

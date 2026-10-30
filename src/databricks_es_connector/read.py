@@ -2,7 +2,7 @@
 
 One entry point, `read_index`, requiring an explicit Spark `StructType` (there is no mapping
 inference: several write transforms are one-way and can't be inverted from `_source` without the
-declared type; see the README "Reading from Elasticsearch" section for the ambiguity rationale). It
+declared type; see "Declaring the schema" in docs/reading.md for the ambiguity rationale). It
 uses the coercion oracle `read_transform.read_coerce` to invert the write transforms per declared
 type.
 

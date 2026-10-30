@@ -3,7 +3,7 @@
 read_coerce turns an ES `_source` value back into the value Spark expects for the declared type. Each
 test feeds it the STORED form a document actually holds (epoch-millis for temporal, base64 for binary,
 a float for decimal, a JSON string for variant) and asserts the reconstructed Python value, including
-the deltas the README documents as one-way (decimal precision, sub-ms timestamp, float32 widening).
+the deltas docs/datatypes.md documents as one-way (decimal precision, sub-ms timestamp).
 
 The stored epoch-millis are computed here from a datetime the independent way (int(ts.timestamp()*
 1000)), NOT via the connector's write code, so this file tests the read inverse on its own. The full
@@ -116,7 +116,7 @@ def test_decimal_read_within_double_precision():
     assert read_coerce(1.5, "decimal(10,2)") == Decimal("1.5")
 
 def test_decimal_precision_loss_is_documented():
-    # 18 sig figs: the value is stored as a lossy float (write->double, README one-way delta). Read
+    # 18 sig figs: the value is stored as a lossy float (write->double, documented one-way delta). Read
     # reconstructs from that stored float, so it does NOT equal the original 18-digit decimal.
     stored = float(Decimal("123456789012345678"))       # the lossy double ES holds
     out = read_coerce(stored, "decimal(38,0)")

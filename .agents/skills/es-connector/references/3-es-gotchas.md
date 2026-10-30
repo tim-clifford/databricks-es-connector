@@ -40,7 +40,7 @@ your raw input against analyzed tokens and usually misses. Query the exact sub-f
   this by default.
 - Caveat when advising: if the user pre-created an EXPLICIT mapping (`region` as `keyword`), then the
   bare field is correct and `.keyword` doesn't exist, the opposite advice. Tell them to check with
-  `GET /<index>/_mapping/field/<field>`. Documented in the README Reading section.
+  `GET /<index>/_mapping/field/<field>`. Documented in `docs/reading.md`.
 
 ## 3. Dynamic-mapping coercion / `ignore_above`: `_source` faithful, indexed value changed
 
@@ -66,7 +66,7 @@ Consequences:
 
 Proven live in `integration_tests/test_dynamic_mapping_coercion.py` (both halves, with the two
 "surprise" assertions being genuinely red-able if ES ever stopped coercing/truncating). Documented in
-the README "Dynamic-mapping gotcha" note.
+the "Dynamic-mapping gotcha" note in `docs/reading.md`.
 
 ## 4. A field name that literally contains a dot is expanded into a nested object
 

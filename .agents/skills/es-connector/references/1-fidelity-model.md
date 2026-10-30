@@ -2,8 +2,7 @@
 
 The connector's core promise: a value written from Spark to Elasticsearch and read back with the
 same declared schema is **unchanged**, except for two documented one-way deltas. This file is the
-authoritative per-type map. It mirrors the README "Datatype coverage" (write) and "Read fidelity"
-(read) tables; if you change a transform, update those tables and this file together.
+authoritative per-type map. It mirrors the write and read tables in `docs/datatypes.md`; if you change a transform, update those tables and this file together.
 
 The write serializer is `spark_serialize.build_ndjson`, which builds the whole `_bulk` action line
 in Spark with `to_json` (there is one write path; the old per-row Python `coerce_value` path was
@@ -36,7 +35,7 @@ removed in 0.9.0). The read inverse is `read_transform.read_coerce`.
    `decimal(38,2)` `123456789012345678` is written `123456789012345678.00`), and a JSON number with a
    decimal point parses to a DOUBLE on read, so it loses low digits past ~15-17 sig figs EVEN FOR AN
    INTEGRAL VALUE, not only a fractional one. Proven live: `test_datatype_coverage` writes the same
-   18-digit value at `decimal(38,0)` (exact) and `decimal(38,2)` (lossy). Mitigation the README
+   18-digit value at `decimal(38,0)` (exact) and `decimal(38,2)` (lossy). Mitigation `docs/datatypes.md`
    documents: `CAST(col AS STRING)` in Spark before writing, declare `StringType` on read, exact at
    any scale.
 2. **Sub-millisecond timestamp** precision. `unix_millis` floors to the millisecond (ES `date` is
@@ -52,7 +51,7 @@ is a Spark behavior, pinned by `integration_tests/test_datatype_coverage.py`
 Spark change to that rendering would resurface the delta and that test is what would catch it.
 
 If a change would introduce a THIRD one-way delta, that is a contract change: it must be added to the
-README tables, this file, and called out explicitly to the user, not slipped in.
+`docs/datatypes.md` tables, this file, and called out explicitly to the user, not slipped in.
 
 ## Non-finite floats and nulls (write side, `spark_serialize.build_ndjson`)
 

@@ -10,7 +10,7 @@ write transforms are documented as one-way and are NOT invertible from `_source`
   - `variant`/`interval` are stored as strings,
 so only the caller's declared type tells us how to turn the stored value back. Each branch here is
 the exact inverse of a write serialization; the accepted round-trip deltas are precisely those the
-README datatype table documents (sub-millisecond timestamp floor, and a `decimal` with fractional
+docs/datatypes.md tables document (sub-millisecond timestamp floor, and a `decimal` with fractional
 precision beyond double's ~15-17 sig figs): reads introduce no new lossiness.
 
 Target types are given as type *tokens* rather than pyspark objects, so this module stays importable

@@ -1,6 +1,6 @@
 # Reference 4: Testing and releasing
 
-The authoritative release procedure is `RELEASING.md` in the repo root, follow it, don't duplicate
+The authoritative release procedure is `docs/releasing.md`, follow it, don't duplicate
 it. This file is the orientation around it: the two test tiers, how to run each, and the FEVM
 specifics that are easy to forget. The deterministic gates live in `scripts/`; this skill points at
 them, it never re-implements them.
@@ -38,7 +38,7 @@ wheel Volume `/Volumes/tim_clifford_classic_dsl_lite_catalog/es_poc/artifacts/`;
 
 ```bash
 # 1. Build + upload the wheel FIRST (the fixtures %pip-install it by path from the Volume, so a
-#    stale wheel there is what gets tested). Verify local md5 == uploaded md5. (RELEASING.md step 1.)
+#    stale wheel there is what gets tested). Verify local md5 == uploaded md5. (docs/releasing.md step 1.)
 python -m build --wheel && md5 dist/databricks_es_connector-*.whl
 VOL=/Volumes/tim_clifford_classic_dsl_lite_catalog/es_poc/artifacts
 databricks fs cp dist/databricks_es_connector-*.whl "dbfs:$VOL/" --overwrite \
@@ -61,7 +61,7 @@ dbx_test run \
 is a useful second live check on a release candidate, but it is not part of this repo's gate: the
 integration tier above is what has to be green.
 
-## The release gates (`scripts/`, all hard gates in RELEASING.md step 3)
+## The release gates (`scripts/`, all hard gates: `check_tier_results.py` in docs/releasing.md step 2, the rest in step 3)
 
 - **`scripts/check_requirements_match.py`**, resolves the built wheel's dependency closure in a
   throwaway venv and compares it name+version exact against `requirements.txt` (which pyproject's
@@ -69,7 +69,7 @@ integration tier above is what has to be green.
   Run it with the SAME Python minor version used to regenerate `requirements.txt` (env markers can
   otherwise cause a spurious mismatch).
 - **`scripts/check_readme_sync.py`**, asserts every shipped module, integration fixture, and release
-  script is referenced by name in the README that should list it (whole-tree invariant; catches the
+  script is referenced by name in the doc that should list it (whole-tree invariant; catches the
   drift a diff-scoped review can't). Exit 1 with the gaps. Matching is word-boundary aware
   (`read.py` is NOT satisfied by `read_transform.py`).
 - **`scripts/check_tier_results.py`**, asserts the tier RAN what it claims to cover: every fixture
@@ -88,7 +88,7 @@ integration tier above is what has to be green.
   per-case parametrize expansion, so it must stay in step with `_get_test_methods`:
   `tests/test_check_tier_results.py` pins that parity along with every failure shape.
 - **`scripts/check_version_consistency.py`**, asserts `pyproject.toml`'s version matches
-  `__init__.__version__`, `HANDOFF.md`'s header, and every wheel-filename reference in the docs, this
+  `__init__.__version__`, `docs/production-readiness.md`'s header, and every wheel-filename reference in the docs, this
   skill, and `integration_tests/config/test_config.yml`. That last file is the reason it exists: it
   pins the wheel the live integration tier INSTALLS, so a stale pin silently validates the previous
   release while reporting success. Also fails if it matches ZERO wheel references, so a moved file
