@@ -15,7 +15,7 @@ reviewed, merged commit.
 - A clean checkout of the commit you intend to tag (usually the merge commit on `main`).
 - The version in `pyproject.toml` `[project].version` already bumped to the target (e.g. `0.4.2`).
 - A Databricks profile with access to the FEVM workspace (default
-  `fe-vm-tim-clifford-classic-dsl-lite`) and the `es_poc` secret scope, for the integration tier.
+  `fevm-grp-fde-cyber-sbx-stable`) and the `es_poc` secret scope, for the integration tier.
 - `gh` authenticated against the repo.
 
 ## The four steps
