@@ -18,9 +18,9 @@
 # MAGIC capture from `on_batch` does not propagate back to the notebook (the ES doc count is the
 # MAGIC authoritative signal instead).
 # MAGIC
-# MAGIC Needs live ES + the `es_poc` scope, a UC catalog/schema to hold a throwaway Delta table, and a
-# MAGIC UC Volume for the checkpoint (dbfs:/tmp fails with INSUFFICIENT_PERMISSIONS on serverless).
-# MAGIC All three are created/dropped by the fixture.
+# MAGIC Needs live ES + the `es_poc` scope, an existing UC schema to hold a throwaway Delta table, and an
+# MAGIC existing UC Volume for the checkpoint (dbfs:/tmp fails with INSUFFICIENT_PERMISSIONS on serverless).
+# MAGIC The fixture creates and drops only its own table and checkpoint directory, never the schema or Volume.
 
 # COMMAND ----------
 import json, requests, urllib3
@@ -36,7 +36,7 @@ ES_AUTH = (dbutils.secrets.get(SCOPE, "username"), dbutils.secrets.get(SCOPE, "p
 # A throwaway Delta source table + a checkpoint dir on a UC Volume, in the same catalog/schema the
 # rest of this workspace's fixtures use. The names are distinct so nothing is shared with any other
 # job in the workspace; both are dropped in cleanup.
-CATALOG = "tim_clifford_classic_dsl_lite_catalog"
+CATALOG = "grp_fde_cyber_sbx_stable_catalog"
 SCHEMA = "es_poc"
 SRC_TABLE = f"{CATALOG}.{SCHEMA}.connector_it_streaming_src"
 CHECKPOINT = f"/Volumes/{CATALOG}/{SCHEMA}/artifacts/checkpoints/connector_it_streaming"

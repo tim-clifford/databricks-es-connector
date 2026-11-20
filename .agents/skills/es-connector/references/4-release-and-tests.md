@@ -31,8 +31,9 @@ in `spark_prep.py` are ONLY provable here.
 
 ## Running the integration tier on FEVM (the muscle memory)
 
-Profile `fe-vm-tim-clifford-classic-dsl-lite`; catalog `tim_clifford_classic_dsl_lite_catalog`;
-wheel Volume `/Volumes/tim_clifford_classic_dsl_lite_catalog/es_poc/artifacts/`; secret scope
+Profile `fevm-grp-fde-cyber-sbx-stable`; catalog `grp_fde_cyber_sbx_stable_catalog` (shared with other
+users: touch only schema `es_poc`);
+wheel Volume `/Volumes/grp_fde_cyber_sbx_stable_catalog/es_poc/artifacts/`; secret scope
 `es_poc` (keys `hosts`, `username`, `password`). ES creds come from the scope, never plaintext;
 `verify_certs=False` is sandbox-only.
 
@@ -40,19 +41,19 @@ wheel Volume `/Volumes/tim_clifford_classic_dsl_lite_catalog/es_poc/artifacts/`;
 # 1. Build + upload the wheel FIRST (the fixtures %pip-install it by path from the Volume, so a
 #    stale wheel there is what gets tested). Verify local md5 == uploaded md5. (docs/releasing.md step 1.)
 python -m build --wheel && md5 dist/databricks_es_connector-*.whl
-VOL=/Volumes/tim_clifford_classic_dsl_lite_catalog/es_poc/artifacts
+VOL=/Volumes/grp_fde_cyber_sbx_stable_catalog/es_poc/artifacts
 databricks fs cp dist/databricks_es_connector-*.whl "dbfs:$VOL/" --overwrite \
-  --profile fe-vm-tim-clifford-classic-dsl-lite
+  --profile fevm-grp-fde-cyber-sbx-stable
 
 # 2. Sync fixtures to the workspace, then run. Re-importing a dir can leave stale .py-suffixed
 #    notebooks alongside the suffixless ones -> DELETE the stale copies so each fixture runs once.
 databricks workspace import-dir integration_tests \
   /Workspace/Users/<you>/es_connector_integration --overwrite \
-  --profile fe-vm-tim-clifford-classic-dsl-lite
+  --profile fevm-grp-fde-cyber-sbx-stable
 
 dbx_test run \
   --tests-dir /Workspace/Users/<you>/es_connector_integration \
-  --workspace-tests --profile fe-vm-tim-clifford-classic-dsl-lite \
+  --workspace-tests --profile fevm-grp-fde-cyber-sbx-stable \
   --config integration_tests/config/test_config.yml
 ```
 
